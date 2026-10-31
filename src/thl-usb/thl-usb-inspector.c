@@ -206,7 +206,7 @@ static int usb_is_hid(const char *devid) {
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         if (strncmp(e->d_name, devid, strlen(devid)) != 0) continue;
-        char cls_path[512];
+        char cls_path[768];
         snprintf(cls_path, sizeof(cls_path), "%s/%s/bInterfaceClass", base, e->d_name);
         FILE *f = fopen(cls_path, "r");
         if (!f) continue;
@@ -245,7 +245,7 @@ static int is_forensic_tool(const char *devid, const char **name_out) {
                 if ((uint16_t)v == vid && (uint16_t)p == pid) {
                     fclose(f);
                     static char dbname[128];
-                    strncpy(dbname, nm, sizeof(dbname)-1);
+                    snprintf(dbname, sizeof(dbname), "%s", nm);
                     *name_out = dbname;
                     return 1;
                 }
@@ -315,7 +315,7 @@ static int run_pin_dialog(const char *devid) {
 /* ── O.MG / BadUSB rate detection ───────────────────────────────────────── */
 
 typedef struct {
-    char devnode[64];
+    char devnode[320];
     char devid[64];
     pthread_t thread;
 } hid_monitor_t;
@@ -398,7 +398,7 @@ static void start_hid_monitor(const char *devid) {
             hid_monitor_t *m = calloc(1, sizeof(hid_monitor_t));
             snprintf(m->devnode, sizeof(m->devnode),
                      "/dev/input/%s", e2->d_name);
-            strncpy(m->devid, devid, sizeof(m->devid)-1);
+            snprintf(m->devid, sizeof(m->devid), "%s", devid);
             pthread_create(&m->thread, NULL, hid_rate_monitor, m);
             pthread_detach(m->thread);
         }

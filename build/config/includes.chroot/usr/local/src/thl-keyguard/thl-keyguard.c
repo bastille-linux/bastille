@@ -607,7 +607,7 @@ static int cmd_unlock(const char *device, const char *dm_name,
     /* Find keystore */
     char ks_path[MAX_PATH];
     if (ks_path_override) {
-        strncpy(ks_path, ks_path_override, sizeof(ks_path) - 1);
+        snprintf(ks_path, sizeof(ks_path), "%s", ks_path_override);
     } else {
         /* Get UUID from device */
         char uuid[MAX_UUID] = {0};
