@@ -453,7 +453,6 @@ static int luks_add_key(const char *device, const char *existing_key,
     }
     close(pfd[0]);
     ssize_t w = write(pfd[1], new_key, new_len);
-    (void)w;
     close(pfd[1]);
 
     int status;
@@ -463,7 +462,8 @@ static int luks_add_key(const char *device, const char *existing_key,
     fd = open(tmp_existing, O_WRONLY);
     if (fd >= 0) {
         uint8_t zeros[256] = {0};
-        (void)write(fd, zeros, existing_len < sizeof(zeros) ? existing_len : sizeof(zeros));
+        ssize_t _zw = write(fd, zeros, existing_len < sizeof(zeros) ? existing_len : sizeof(zeros));
+        if (_zw < 0) {} /* best-effort zeroing, ignore failure */
         close(fd);
     }
     unlink(tmp_existing);

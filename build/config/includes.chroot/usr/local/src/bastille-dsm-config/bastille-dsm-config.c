@@ -47,7 +47,7 @@ static void shred_file(const char *path)
         char buf[512];
         memset(buf, 0, sizeof(buf));
         for (off_t i = 0; i < st.st_size; i += sizeof(buf))
-            (void)write(fd, buf, sizeof(buf));
+            if (write(fd, buf, sizeof(buf)) < 0) {}
         fsync(fd);
     }
     close(fd);

@@ -180,7 +180,7 @@ static void usb_authorize(const char *devid, int allow) {
     snprintf(path, sizeof(path), AUTHORIZED_FMT, devid);
     int fd = open(path, O_WRONLY);
     if (fd < 0) return;
-    write(fd, allow ? "1" : "0", 1);
+    if (write(fd, allow ? "1" : "0", 1) < 0) {}
     close(fd);
 }
 

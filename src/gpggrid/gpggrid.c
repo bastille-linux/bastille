@@ -299,8 +299,8 @@ static int run_gpg(const char *passphrase, int pass_len,
 
     /* Parent: write passphrase + newline, then close */
     close(pfd[0]);
-    write(pfd[1], passphrase, (size_t)pass_len);
-    write(pfd[1], "\n", 1);
+    if (write(pfd[1], passphrase, (size_t)pass_len) < 0) {}
+    if (write(pfd[1], "\n", 1) < 0) {}
     close(pfd[1]);
 
     int status;
