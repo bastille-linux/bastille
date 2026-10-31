@@ -73,97 +73,71 @@ EOF
 
 chmod 600 /etc/thl/usb-threat-db/forensic.conf
 
-# ── Systemd services ───────────────────────────────────────────────────────
+# ── OpenRC services ────────────────────────────────────────────────────────
+# Bastille OS uses OpenRC (not systemd). Create init scripts and register them.
 
-# USB inspector
-cat > /etc/systemd/system/thl-usb-inspector.service << 'EOF'
-[Unit]
-Description=THL USB threat detection and PIN gate
-After=sysinit.target udev.target
-Before=graphical.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/sbin/thl-usb-inspector
-Restart=on-failure
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
+# USB inspector — daemon watching udev events
+cat > /etc/init.d/thl-usb-inspector << 'EOF'
+#!/sbin/openrc-run
+description="THL USB threat detection and PIN gate"
+command="/usr/local/sbin/thl-usb-inspector"
+command_background="yes"
+pidfile="/run/thl-usb-inspector.pid"
+depend() {
+    need udev
+    after thl-hostname
+}
 EOF
+chmod +x /etc/init.d/thl-usb-inspector
+rc-update add thl-usb-inspector default || true
 
-# Vision guard (user service — needs Wayland session)
-mkdir -p /etc/systemd/user
-cat > /etc/systemd/user/thl-vision-guard.service << 'EOF'
-[Unit]
-Description=THL vision guard (focus loss lock + privacy screen)
-After=graphical-session.target
-PartOf=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/sbin/thl-vision-guard
-Restart=on-failure
-RestartSec=5
-Environment="DISPLAY="
-
-[Install]
-WantedBy=graphical-session.target
+# Network guard — daemon enforcing offline mode / kill switch
+cat > /etc/init.d/thl-network-guard << 'EOF'
+#!/sbin/openrc-run
+description="THL network security enforcer"
+command="/usr/local/sbin/thl-network-guard"
+command_args="watch"
+command_background="yes"
+pidfile="/run/thl-network-guard.pid"
+depend() {
+    need net
+    after wg-quick.wg0
+}
 EOF
+chmod +x /etc/init.d/thl-network-guard
+rc-update add thl-network-guard default || true
 
-# Network guard
-cat > /etc/systemd/system/thl-network-guard.service << 'EOF'
-[Unit]
-Description=THL network security enforcer (offline mode)
-After=network-online.target wg-quick@wg0.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/sbin/thl-network-guard watch
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
+# Disable transparent hugepages — run once at boot via sysctl override
+cat > /etc/sysctl.d/90-thl-thp.conf << 'EOF'
+# Disable transparent hugepages to minimise RAM footprint
+vm.nr_hugepages = 0
 EOF
+# Runtime disable via local.d (runs after rc.local)
+install -d /etc/local.d
+cat > /etc/local.d/thl-disable-thp.start << 'EOF'
+#!/bin/sh
+for f in /sys/kernel/mm/transparent_hugepage/enabled \
+          /sys/kernel/mm/transparent_hugepage/defrag; do
+    [ -w "$f" ] && printf 'never' > "$f"
+done
+EOF
+chmod +x /etc/local.d/thl-disable-thp.start
+rc-update add local default || true
 
-# Enable services
-systemctl enable thl-usb-inspector.service
-systemctl enable thl-network-guard.service
-systemctl enable thl-ram-scrub.timer
+# Vision guard — launched by Sway autostart (needs Wayland compositor)
+# Register as a Sway autostart entry so it starts with the user session.
+mkdir -p /etc/skel/.config/sway
+if [ -f /etc/skel/.config/sway/config ]; then
+    if ! grep -q thl-vision-guard /etc/skel/.config/sway/config; then
+        echo 'exec /usr/local/sbin/thl-vision-guard' \
+            >> /etc/skel/.config/sway/config
+    fi
+fi
 
-# Vision guard is user-level — enable via skel
-mkdir -p /etc/skel/.config/systemd/user
-ln -sf /etc/systemd/user/thl-vision-guard.service \
-    /etc/skel/.config/systemd/user/thl-vision-guard.service
-mkdir -p /etc/skel/.config/systemd/user/graphical-session.target.wants
-ln -sf /etc/systemd/user/thl-vision-guard.service \
-    /etc/skel/.config/systemd/user/graphical-session.target.wants/thl-vision-guard.service
-
-# ── Swayidle: sleep every 3 minutes ───────────────────────────────────────
-# Update Sway config to lock after 3 minutes idle (was 5 minutes)
+# ── Swayidle: lock after 3 minutes idle ───────────────────────────────────
 if [ -f /etc/skel/.config/sway/config ]; then
     sed -i 's/timeout 300  .*/timeout 180  '"'"'\/usr\/local\/sbin\/thl-lock'"'"'/' \
         /etc/skel/.config/sway/config
 fi
-
-# ── Transparent hugepages disabled ────────────────────────────────────────
-cat > /etc/systemd/system/thl-disable-thp.service << 'EOF'
-[Unit]
-Description=Disable transparent hugepages (RAM minimization)
-DefaultDependencies=no
-After=sysinit.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled; echo never > /sys/kernel/mm/transparent_hugepage/defrag'
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl enable thl-disable-thp.service
 
 echo "All new THL features installed and enabled."
