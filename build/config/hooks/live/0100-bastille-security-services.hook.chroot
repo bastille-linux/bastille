@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # ── Permissions ───────────────────────────────────────────────────────────────
-chmod 700 /usr/local/bin/bastille-lock
-chmod 700 /usr/local/bin/bastille-me-neutralize
+chmod 700 /usr/local/sbin/bastille-lock
+chmod 700 /usr/local/sbin/bastille-me-neutralize
 
 # ── dnscrypt-proxy cache dir ──────────────────────────────────────────────────
 install -d -m 750 /var/cache/dnscrypt-proxy
