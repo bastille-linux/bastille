@@ -16,8 +16,8 @@ make install DESTDIR=
 make clean
 
 # Set action scripts executable and root-only
-chmod 0700 /etc/bastille/actions
-chmod 0750 /etc/bastille/actions/*.sh
+install -d -m 0700 /etc/bastille/actions
+[ -n "$(ls /etc/bastille/actions/*.sh 2>/dev/null)" ] && chmod 0750 /etc/bastille/actions/*.sh || true
 chmod 0750 /usr/local/sbin/bastille-dsm
 chmod 0750 /usr/local/sbin/bastille-dsm-prompt
 chmod 0750 /usr/local/sbin/bastille-dsm-watchdog

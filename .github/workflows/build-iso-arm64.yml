@@ -40,12 +40,12 @@ jobs:
 
       - name: Strip x86-only packages for arm64
         run: |
-          sed -i '/xserver-xorg-video-intel/d' build/config/package-lists/thl-base.list.chroot
-          sed -i '/intel-microcode/d'          build/config/package-lists/thl-base.list.chroot
-          sed -i '/msr-tools/d'                build/config/package-lists/thl-base.list.chroot
-          sed -i '/dmidecode/d'                build/config/package-lists/thl-base.list.chroot
-          sed -i '/flashrom/d'                 build/config/package-lists/thl-base.list.chroot
-          sed -i '/torbrowser-launcher/d'      build/config/package-lists/thl-base.list.chroot
+          sed -i '/xserver-xorg-video-intel/d' build/config/package-lists/bastille-base.list.chroot
+          sed -i '/intel-microcode/d'          build/config/package-lists/bastille-base.list.chroot
+          sed -i '/msr-tools/d'                build/config/package-lists/bastille-base.list.chroot
+          sed -i '/dmidecode/d'                build/config/package-lists/bastille-base.list.chroot
+          sed -i '/flashrom/d'                 build/config/package-lists/bastille-base.list.chroot
+          sed -i '/torbrowser-launcher/d'      build/config/package-lists/bastille-base.list.chroot
 
       - name: Build ISO
         shell: bash
