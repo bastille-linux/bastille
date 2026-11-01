@@ -82,7 +82,7 @@ cat > /etc/greetd/config.toml << 'TOML'
 vt = 1
 
 [default_session]
-command = "sway"
+command = "env WLR_NO_HARDWARE_CURSORS=1 WLR_RENDERER=pixman WLR_BACKENDS=drm sway"
 user = "user"
 TOML
 
