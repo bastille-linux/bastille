@@ -2,8 +2,30 @@
 # Hook: Set permissions on all Bastille apps and helpers
 set -euo pipefail
 
-# ── seatd: add user to seat group so Sway can get seat access ─────────────────
-usermod -aG seat user 2>/dev/null || true
+# ── seatd: pre-populate /etc/group so Sway can get seat access ────────────────
+# 'user' is created at runtime by live-boot, so usermod fails at build time.
+# Instead, add 'user' directly to the group file now; live-boot preserves it.
+python3 - << 'PYEOF'
+import sys
+groups_to_join = ['seat', 'video', 'input', 'audio', 'render', 'tty']
+live_user = 'user'
+with open('/etc/group', 'r') as f:
+    lines = f.readlines()
+new_lines = []
+for line in lines:
+    parts = line.rstrip('\n').split(':')
+    if len(parts) == 4 and parts[0] in groups_to_join:
+        members = [m for m in parts[3].split(',') if m]
+        if live_user not in members:
+            members.append(live_user)
+        parts[3] = ','.join(members)
+        new_lines.append(':'.join(parts) + '\n')
+    else:
+        new_lines.append(line)
+with open('/etc/group', 'w') as f:
+    f.writelines(new_lines)
+print("seat/video/input/audio/render/tty groups: user added")
+PYEOF
 
 # ── User-facing apps (executable by user) ─────────────────────────────────────
 for bin in \
@@ -52,14 +74,16 @@ chmod 644 /usr/share/polkit-1/rules.d/50-bastille-helpers.rules 2>/dev/null || t
 # ── Desktop database ──────────────────────────────────────────────────────────
 update-desktop-database /usr/share/applications 2>/dev/null || true
 
-# ── greetd — configure with agreety (text greeter, bundled with greetd) ───────
+# ── greetd — auto-login live user directly into Sway ─────────────────────────
+# Auto-login is correct for a live system: no password prompt, and greetd
+# creates the seat session itself so Sway inherits it cleanly via seatd.
 cat > /etc/greetd/config.toml << 'TOML'
 [terminal]
 vt = 1
 
 [default_session]
-command = "agreety --cmd sway"
-user = "greeter"
+command = "sway"
+user = "user"
 TOML
 
 echo "bastille-apps-setup: done"
