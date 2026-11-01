@@ -43,6 +43,16 @@ rc-update add wg-quick.wg0        default || true
 # DSM watchdog: enabled only when /etc/bastille/dsm.enabled exists (checked at runtime)
 rc-update add bastille-dsm-watchdog default || true
 
+# ── SSH: enable for live diagnostic access ────────────────────────────────────
+rc-update add ssh default || true
+
+# ── Getty on tty2: fallback console when greetd/sway fails ───────────────────
+# agetty is provided by util-linux; this ensures we can always log in via VT2
+if [ -f /etc/init.d/agetty ]; then
+    ln -sf /etc/init.d/agetty /etc/init.d/agetty.tty2 2>/dev/null || true
+    rc-update add agetty.tty2 default || true
+fi
+
 # Tor and i2pd: disabled by default; user enables via Settings > Network > Tor / i2p
 # rc-update add bastille-tor default || true
 # rc-update add i2pd    default || true

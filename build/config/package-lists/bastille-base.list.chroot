@@ -1,5 +1,6 @@
 # Base system
 # NOTE: sysvinit-core + openrc installed by 0001 hook AFTER systemd-sysv is purged
+openssh-server
 dbus
 udev
 util-linux
