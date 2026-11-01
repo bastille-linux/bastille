@@ -58,30 +58,24 @@ EOF
 
 # ── Firmware backup directory ──────────────────────────────────────────────
 
-mkdir -p /var/lib/thl/firmware-backups
-chmod 700 /var/lib/thl/firmware-backups
+mkdir -p /var/lib/bastille/firmware-backups
+chmod 700 /var/lib/bastille/firmware-backups
 
 # ── Boot-time firmware audit service ──────────────────────────────────────
 # Run audit on every boot and log results. Does not block boot on WARN.
 
-cat > /etc/systemd/system/bastille-firmware-audit.service << 'EOF'
-[Unit]
-Description=THL sub-ring-0 firmware audit
-DefaultDependencies=no
-After=sysinit.target local-fs.target
-Before=network-pre.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/bastille-firmware-audit --quiet
-StandardOutput=journal
-StandardError=journal
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
+cat > /etc/init.d/bastille-firmware-audit << 'EOF'
+#!/sbin/openrc-run
+description="Bastille sub-ring-0 firmware audit"
+command="/usr/local/sbin/bastille-firmware-audit"
+command_args="--quiet"
+command_background="no"
+depend() {
+    need localmount
+    before net
+}
 EOF
-
-systemctl enable bastille-firmware-audit.service
+chmod +x /etc/init.d/bastille-firmware-audit
+rc-update add bastille-firmware-audit default || true
 
 echo "Firmware tools and sub-ring-0 hardening installed."
