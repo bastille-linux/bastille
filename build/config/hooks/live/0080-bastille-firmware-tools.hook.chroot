@@ -1,0 +1,87 @@
+#!/bin/sh
+# Install firmware tools and sub-ring-0 hardening scripts inside the chroot.
+set -e
+
+# ── Install firmware scripts ───────────────────────────────────────────────
+
+install -m 0755 /usr/local/src/bastille-firmware/bastille-me-neutralize.sh \
+    /usr/local/sbin/bastille-me-neutralize
+
+install -m 0755 /usr/local/src/bastille-firmware/bastille-firmware-audit.sh \
+    /usr/local/sbin/bastille-firmware-audit
+
+install -m 0755 /usr/local/src/bastille-firmware/bastille-ring-hardening.sh \
+    /usr/local/sbin/bastille-ring-hardening
+
+# ── me_cleaner library dir ─────────────────────────────────────────────────
+# me_cleaner.py is downloaded at runtime by bastille-me-neutralize --install-tools
+# because pinning a specific commit hash is safer than shipping it in the image.
+# We create the directory and a README.
+
+mkdir -p /usr/local/lib/bastille-firmware
+cat > /usr/local/lib/bastille-firmware/README << 'EOF'
+me_cleaner.py is not shipped in the image — it is downloaded and verified at
+runtime by:
+
+  bastille-me-neutralize --install-tools
+
+This avoids shipping a firmware-manipulation tool that may interact badly with
+hardware the image has never seen. Always verify the SHA256 after download.
+EOF
+
+# ── KVM blacklist (Ring -1 hardening) ─────────────────────────────────────
+# Applied statically — no need to run --apply at runtime on a fresh image.
+
+cat > /etc/modprobe.d/bastille-ring1.conf << 'EOF'
+# THL Ring -1 hardening: no KVM hypervisor modules.
+blacklist kvm
+blacklist kvm_intel
+blacklist kvm_amd
+blacklist vhost
+blacklist vhost_net
+blacklist vhost_vsock
+EOF
+
+# ── S3/S4 sleep disabled ───────────────────────────────────────────────────
+# Reduces SMM (Ring -2) surface. Users who need suspend can remove this.
+
+mkdir -p /etc/systemd/sleep.conf.d
+cat > /etc/systemd/sleep.conf.d/bastille-no-s3.conf << 'EOF'
+[Sleep]
+# THL: disable suspend/hibernate — uses SMM heavily and increases attack surface.
+# Lock then power-off is the recommended pattern.
+AllowSuspend=no
+AllowHibernation=no
+AllowSuspendThenHibernate=no
+AllowHybridSleep=no
+EOF
+
+# ── Firmware backup directory ──────────────────────────────────────────────
+
+mkdir -p /var/lib/thl/firmware-backups
+chmod 700 /var/lib/thl/firmware-backups
+
+# ── Boot-time firmware audit service ──────────────────────────────────────
+# Run audit on every boot and log results. Does not block boot on WARN.
+
+cat > /etc/systemd/system/bastille-firmware-audit.service << 'EOF'
+[Unit]
+Description=THL sub-ring-0 firmware audit
+DefaultDependencies=no
+After=sysinit.target local-fs.target
+Before=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bastille-firmware-audit --quiet
+StandardOutput=journal
+StandardError=journal
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable bastille-firmware-audit.service
+
+echo "Firmware tools and sub-ring-0 hardening installed."

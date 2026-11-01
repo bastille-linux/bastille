@@ -1,0 +1,143 @@
+#!/bin/sh
+# Wire all new features into the chroot image.
+set -e
+
+
+# ── Build USB inspector ────────────────────────────────────────────────────
+
+cd /usr/local/src/bastille-usb
+
+gcc -O2 -Wall \
+    -o /usr/local/sbin/bastille-usb-inspector \
+    bastille-usb-inspector.c \
+    -lsodium -lpthread
+
+gcc -O2 -Wall \
+    -o /usr/local/sbin/bastille-usb-pin-dialog \
+    bastille-usb-pin-dialog.c \
+    -lsodium
+
+install -m 0755 bastille-usb-pin-input /usr/local/sbin/bastille-usb-pin-input
+
+# ── Install vision guard ───────────────────────────────────────────────────
+
+install -m 0755 /usr/local/src/bastille-vision/bastille-vision-guard \
+    /usr/local/sbin/bastille-vision-guard
+
+# Default vision guard config
+mkdir -p /etc/bastille
+cat > /etc/bastille/vision-guard.conf << 'EOF'
+[vision-guard]
+lock_after_secs = 10
+privacy_faces   = 2
+privacy_dim     = 0.05
+camera_device   = 0
+check_interval  = 0.5
+debug           = false
+EOF
+
+# ── Install network guard ──────────────────────────────────────────────────
+
+chmod 0755 /usr/local/sbin/bastille-network-guard
+chmod 0644 /etc/nftables/bastille-offline.nft
+
+# ── Install persistence tool ───────────────────────────────────────────────
+
+mkdir -p /usr/local/src/bastille-persist
+install -m 0755 /usr/local/src/bastille-persist/bastille-persist-setup \
+    /usr/local/bin/bastille-persist-setup
+
+# ── Wipe scripts ──────────────────────────────────────────────────────────
+
+chmod 0700 \
+    /etc/bastille/actions/fake-wipe.sh \
+    /etc/bastille/actions/full-wipe.sh
+
+# ── Threat database ────────────────────────────────────────────────────────
+
+mkdir -p /etc/bastille/usb-threat-db
+cat > /etc/bastille/usb-threat-db/forensic.conf << 'EOF'
+# THL USB forensic tool threat database
+# Format: VID:PID Description
+# Lines starting with # are comments.
+# The built-in list in bastille-usb-inspector covers Cellebrite, MSAB, Oxygen,
+# Magnet, MediaTek BROM, Qualcomm EDL. Add hardware-specific entries here.
+
+# Example: my organisation's approved forensic tool (add to allowlist, not here)
+# 0000:0000 Example tool
+
+# Commonly-seen JTAG/UART bridges used in forensic extraction (flagged when locked)
+0403:6014 FTDI FT232H (flag-if-locked)
+10C4:EA60 Silicon Labs CP210x (flag-if-locked)
+EOF
+
+chmod 600 /etc/bastille/usb-threat-db/forensic.conf
+
+# ── OpenRC services ────────────────────────────────────────────────────────
+# Bastille OS uses OpenRC (not systemd). Create init scripts and register them.
+
+# USB inspector — daemon watching udev events
+cat > /etc/init.d/bastille-usb-inspector << 'EOF'
+#!/sbin/openrc-run
+description="THL USB threat detection and PIN gate"
+command="/usr/local/sbin/bastille-usb-inspector"
+command_background="yes"
+pidfile="/run/bastille-usb-inspector.pid"
+depend() {
+    need udev
+    after bastille-hostname
+}
+EOF
+chmod +x /etc/init.d/bastille-usb-inspector
+rc-update add bastille-usb-inspector default || true
+
+# Network guard — daemon enforcing offline mode / kill switch
+cat > /etc/init.d/bastille-network-guard << 'EOF'
+#!/sbin/openrc-run
+description="THL network security enforcer"
+command="/usr/local/sbin/bastille-network-guard"
+command_args="watch"
+command_background="yes"
+pidfile="/run/bastille-network-guard.pid"
+depend() {
+    need net
+    after wg-quick.wg0
+}
+EOF
+chmod +x /etc/init.d/bastille-network-guard
+rc-update add bastille-network-guard default || true
+
+# Disable transparent hugepages — run once at boot via sysctl override
+cat > /etc/sysctl.d/90-bastille-thp.conf << 'EOF'
+# Disable transparent hugepages to minimise RAM footprint
+vm.nr_hugepages = 0
+EOF
+# Runtime disable via local.d (runs after rc.local)
+install -d /etc/local.d
+cat > /etc/local.d/bastille-disable-thp.start << 'EOF'
+#!/bin/sh
+for f in /sys/kernel/mm/transparent_hugepage/enabled \
+          /sys/kernel/mm/transparent_hugepage/defrag; do
+    [ -w "$f" ] && printf 'never' > "$f"
+done
+EOF
+chmod +x /etc/local.d/bastille-disable-thp.start
+rc-update add local default || true
+
+# Vision guard — launched by Sway autostart (needs Wayland compositor)
+# Register as a Sway autostart entry so it starts with the user session.
+mkdir -p /etc/skel/.config/sway
+if [ -f /etc/skel/.config/sway/config ]; then
+    if ! grep -q bastille-vision-guard /etc/skel/.config/sway/config; then
+        echo 'exec /usr/local/sbin/bastille-vision-guard' \
+            >> /etc/skel/.config/sway/config
+    fi
+fi
+
+# ── Swayidle: lock after 3 minutes idle ───────────────────────────────────
+if [ -f /etc/skel/.config/sway/config ]; then
+    sed -i 's/timeout 300  .*/timeout 180  '"'"'\/usr\/local\/sbin\/bastille-lock'"'"'/' \
+        /etc/skel/.config/sway/config
+fi
+
+echo "All new THL features installed and enabled."

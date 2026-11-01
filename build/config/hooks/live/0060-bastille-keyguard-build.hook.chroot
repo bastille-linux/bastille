@@ -1,0 +1,32 @@
+#!/bin/sh
+# Build bastille-keyguard and gpggrid inside the chroot.
+set -e
+
+# bastille-keyguard
+cd /usr/local/src/bastille-keyguard
+make && make install DESTDIR=
+make clean
+
+# gpggrid
+cd /usr/local/src/gpggrid
+make && make install DESTDIR=
+make clean
+
+# bastille-profile
+install -m 0755 /usr/local/src/bastille-profile/bastille-profile /usr/local/bin/bastille-profile
+
+# bastille-usb-authorize (already in includes.chroot)
+chmod 0755 /usr/local/sbin/bastille-usb-authorize
+
+# Create profile storage dir
+mkdir -p /var/lib/thl/profiles
+chmod 700 /var/lib/thl/profiles
+mkdir -p /run/thl  # created fresh each boot by tmpfiles.d
+
+# tmpfiles.d entry so /run/thl is created at boot
+cat > /etc/tmpfiles.d/thl.conf << 'EOF'
+d /run/thl 0700 root root -
+d /run/thl/profiles 0700 root root -
+EOF
+
+echo "bastille-keyguard, gpggrid, bastille-profile installed."

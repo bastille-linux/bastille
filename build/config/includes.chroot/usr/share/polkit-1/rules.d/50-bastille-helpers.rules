@@ -10,7 +10,7 @@ const BASTILLE_HELPERS = [
     "/usr/local/sbin/bastille-set-dns",
     "/usr/local/sbin/bastille-update",
     "/usr/local/sbin/bastille-install",
-    "/usr/local/src/thl-persist/thl-persist-setup",
+    "/usr/local/src/bastille-persist/bastille-persist-setup",
 ];
 
 polkit.addRule(function(action, subject) {

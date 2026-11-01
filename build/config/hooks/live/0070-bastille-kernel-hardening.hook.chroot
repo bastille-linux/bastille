@@ -1,0 +1,68 @@
+#!/bin/sh
+# Apply kernel hardening configuration inside the chroot.
+set -e
+
+# USBGuard is enabled via OpenRC in hook 0010 (rc-update add usbguard).
+# Do NOT call systemctl here — we use OpenRC, not systemd.
+
+# Default USBGuard policy: block everything not present at install time.
+# Users add devices via: usbguard allow-device <id>
+cat > /etc/usbguard/usbguard-daemon.conf << 'EOF'
+RuleFile=/etc/usbguard/rules.conf
+ImplicitPolicyTarget=block
+PresentDevicePolicy=apply-policy
+PresentControllerPolicy=keep
+InsertedDevicePolicy=apply-policy
+RestoreControllerDeviceState=false
+DeviceManagerBackend=uevent
+IPCAllowedUsers=root
+IPCAllowedGroups=usbguard
+DeviceRulesWithPort=false
+AuditBackend=LinuxAudit
+EOF
+
+# Initial allow rule: permit HID devices (keyboards/mice) so the
+# system is usable after install. Adjust this to your hardware.
+cat > /etc/usbguard/rules.conf << 'EOF'
+# Allow HID (keyboards, mice) — required for usability
+allow with-interface equals { 03:00:01 03:01:01 }
+allow with-interface equals { 03:00:02 03:01:02 }
+# Block everything else by default
+block
+EOF
+
+# Update GRUB to add hardening cmdline parameters
+if [ -f /etc/default/grub ]; then
+    update-grub || true
+fi
+
+# Make bastille-hardening.cfg auto-included in grub config
+mkdir -p /etc/default/grub.d
+
+# Restrict /proc to owning user (hidepid)
+# We patch /etc/fstab to mount proc with hidepid=2
+if ! grep -q hidepid /etc/fstab 2>/dev/null; then
+    sed -i 's|proc /proc proc defaults|proc /proc proc defaults,hidepid=2,gid=proc|' /etc/fstab || true
+    echo "proc /proc proc defaults,hidepid=2,gid=proc 0 0" >> /etc/fstab
+fi
+
+# Add user to proc group so it can still read its own /proc entries
+grep -q '^proc:' /etc/group || groupadd -g 990 proc
+usermod -aG proc user || true
+
+# Disable core dumps via limits.conf
+cat >> /etc/security/limits.conf << 'EOF'
+* hard core 0
+* soft core 0
+EOF
+
+# Disable coredumps via PAM (OpenRC does not use systemd coredump handling)
+# limits.conf already has hard core 0 from the block above.
+# Also disable via sysctl (backed by 99-bastille-hardening.conf):
+#   fs.suid_dumpable = 0
+
+# Screen lock eviction: handled by swayidle in the Sway config.
+# swayidle calls swaylock and, on unlock, runs bastille-keyguard evict.
+# (injected into Sway config by hook 0030)
+
+echo "Kernel hardening and USBGuard configured."

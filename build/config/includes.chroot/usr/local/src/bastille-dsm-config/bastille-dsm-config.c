@@ -4,7 +4,7 @@
  * This binary is owned root:root and setuid. It is NOT sudo — it only
  * performs the three specific privileged operations DSM needs:
  *
- *   enable  <argon2id-hash>   write hash to /etc/thl/dsm.pin, touch dsm.enabled
+ *   enable  <argon2id-hash>   write hash to /etc/bastille/dsm.pin, touch dsm.enabled
  *   disable                   shred dsm.pin, remove dsm.enabled
  *   status                    print "enabled" or "disabled", exit 0
  *
@@ -34,8 +34,8 @@
 #include <grp.h>
 #include <errno.h>
 
-#define DSM_PIN_FILE     "/etc/thl/dsm.pin"
-#define DSM_ENABLED_FILE "/etc/thl/dsm.enabled"
+#define DSM_PIN_FILE     "/etc/bastille/dsm.pin"
+#define DSM_ENABLED_FILE "/etc/bastille/dsm.enabled"
 #define MAX_HASH_LEN     256
 
 static void shred_file(const char *path)

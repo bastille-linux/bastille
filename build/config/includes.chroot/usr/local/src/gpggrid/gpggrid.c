@@ -115,7 +115,7 @@ static void draw_grid(const grid_t *g, int pass_len, int max_len,
     /* Header */
     move(0, 0); clrtoeol();
     attron(A_BOLD);
-    mvprintw(0, start_col, "THL gpggrid — passphrase entry");
+    mvprintw(0, start_col, "Bastille gpggrid — passphrase entry");
     attroff(A_BOLD);
 
     mvprintw(1, start_col,
