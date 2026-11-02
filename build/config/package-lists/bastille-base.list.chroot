@@ -1,5 +1,11 @@
 # Base system
-# NOTE: sysvinit-core + openrc installed by 0001 hook AFTER systemd-sysv is purged
+# Init: debootstrap runs with --exclude=systemd-sysv, so sysvinit-core + openrc
+# are installed here. On trixie openrc depends on insserv, which conflicts with
+# systemd-sysv, so systemd-sysv must never be requested.
+sysvinit-core
+sysvinit-utils
+initscripts
+openrc
 openssh-server
 dbus
 udev
@@ -106,7 +112,8 @@ secure-delete
 mat2
 
 # Update / polkit
-policykit-1
+polkitd
+pkexec
 parted
 jq
 
@@ -126,9 +133,12 @@ libadwaita-1-0
 # UI extras
 lxpolkit
 
-# argon2 CLI — PIN key derivation for subsystems (package name is argon2 in bookworm)
+# argon2 CLI — PIN key derivation for subsystems
 argon2
-# age encryption installed via hook from bookworm-backports (not in bookworm main)
+# age encryption, tuigreet greeter and dnscrypt-proxy are all in trixie main
+age
+tuigreet
+dnscrypt-proxy
 
 # Disk installer dependencies (arch-specific grub packages handled by CI workflow strip step)
 squashfs-tools
@@ -137,8 +147,8 @@ efibootmgr
 # Notification support
 libnotify-bin
 
-# neofetch / fastfetch (fastfetch via 0005 hook from GitHub)
-neofetch
+# system info
+fastfetch
 
 # cron (periodic RAM scrub)
 cron

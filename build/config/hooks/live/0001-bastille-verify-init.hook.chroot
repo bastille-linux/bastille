@@ -1,40 +1,33 @@
 #!/bin/sh
-# Runs AFTER all packages are installed.
-# Switches PID-1 from systemd-sysv to sysvinit-core + OpenRC.
+# Fail the build early if the image would boot with systemd as PID 1.
 #
-# History: earlier revisions force-purged systemd-sysv and then ran
-# `apt-get -f install`. apt resolved the broken `init` dependency by picking
-# the FIRST alternative (systemd-sysv), silently reinstalling it, so the image
-# booted systemd and none of the OpenRC services ever started.
+# The init system is chosen by the package lists, not by this hook:
+#   - debootstrap runs with --exclude=systemd-sysv (auto/config)
+#   - bastille-base.list.chroot installs sysvinit-core + openrc
+#   - live.list.chroot installs live-config-sysvinit (live user, hostname, ssh keys)
+# On Debian 13 openrc depends on insserv, which conflicts with systemd-sysv, so
+# the old "install openrc, then swap init" order cannot work and systemd-sysv
+# must never be requested by anything.
 #
-# The supported swap is simply to install sysvinit-core: it Conflicts with
-# systemd-sysv, so apt removes systemd-sysv and keeps `init` satisfied.
-# Debian's openrc package ships /etc/init.d/rc{,S} wrappers that sysvinit's
-# default /etc/inittab calls, so no inittab surgery is needed.
+# History: on Debian 12 an earlier version of this hook purged systemd-sysv and ran
+# `apt-get -f install`, which silently reinstalled it. Every image booted systemd
+# and no OpenRC service ever started. This check exists so that cannot recur.
 set -e
 
-export DEBIAN_FRONTEND=noninteractive
+fail() { echo "[0001] FATAL: $*" >&2; exit 1; }
 
-apt-get -y --no-install-recommends install openrc
-apt-get -y --no-install-recommends install sysvinit-core sysvinit-utils initscripts
+installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; }
 
-# live-config must use its sysvinit backend, otherwise the live user, hostname
-# and ssh host keys are never created at boot (the systemd backend is a unit).
-apt-get -y --no-install-recommends install live-config-sysvinit
+installed systemd-sysv && fail "systemd-sysv is installed"
+installed sysvinit-core || fail "sysvinit-core is not installed"
+installed openrc || fail "openrc is not installed"
+installed live-config-sysvinit || fail "live-config-sysvinit is not installed"
+installed live-config-systemd && fail "live-config-systemd is installed (it cannot run under sysvinit)"
+installed user-setup || fail "user-setup is not installed (live-config cannot create the live user)"
 
-# ── Fail the build loudly if PID 1 is still systemd ───────────────────────────
-if dpkg-query -W -f='${Status}' systemd-sysv 2>/dev/null | grep -q 'install ok installed'; then
-    echo "[0001] FATAL: systemd-sysv is still installed" >&2
-    exit 1
-fi
-if ! dpkg-query -W -f='${Status}' sysvinit-core 2>/dev/null | grep -q 'install ok installed'; then
-    echo "[0001] FATAL: sysvinit-core is not installed" >&2
-    exit 1
-fi
-if readlink -f /sbin/init | grep -q systemd; then
-    echo "[0001] FATAL: /sbin/init -> $(readlink -f /sbin/init)" >&2
-    exit 1
-fi
-[ -f /etc/inittab ] || { echo "[0001] FATAL: no /etc/inittab" >&2; exit 1; }
+init_target="$(readlink -f /sbin/init)"
+case "$init_target" in *systemd*) fail "/sbin/init -> $init_target" ;; esac
+[ -f /etc/inittab ] || fail "no /etc/inittab"
+[ -x /sbin/openrc ] || fail "no /sbin/openrc"
 
-echo "[0001] sysvinit-core + openrc + live-config-sysvinit installed, systemd-sysv removed"
+echo "[0001] init OK: /sbin/init -> $init_target, openrc + live-config-sysvinit present"

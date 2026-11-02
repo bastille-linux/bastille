@@ -1,6 +1,6 @@
 # Bastille OS
 
-A security-hardened Debian 12 live Linux. Boots from USB into RAM. No traces left on the host.
+A security-hardened Debian 13 live Linux. Boots from USB into RAM. No traces left on the host.
 
 ---
 

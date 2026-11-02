@@ -11,3 +11,15 @@ build/config/source
 output/*.iso
 output/*.sha256
 output/build/
+
+# local test artifacts
+build/*.iso
+build/*.qcow2
+build/*.img
+.freebuff/
+
+# local test artifacts
+build/*.iso
+build/*.qcow2
+build/*.img
+.freebuff/

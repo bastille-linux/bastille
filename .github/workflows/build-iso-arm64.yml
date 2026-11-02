@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     container:
-      image: debian:bookworm
+      image: debian:trixie
       options: --privileged
 
     steps:
