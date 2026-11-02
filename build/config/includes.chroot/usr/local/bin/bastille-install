@@ -1,0 +1,628 @@
+#!/usr/bin/env python3
+"""bastille-install — Bastille OS disk installer (GTK4 / libadwaita wizard).
+
+This is only the front end. The privileged work is done by
+/usr/local/sbin/bastille-install-backend, which this window drives over a
+pipe (JSON lines). Written against libadwaita 1.2 so it runs on Debian 12
+as well as newer bases.
+"""
+
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+
+APP_ID = "org.bastilleos.Installer"
+BACKEND = os.environ.get("BASTILLE_INSTALL_BACKEND",
+                         "/usr/local/sbin/bastille-install-backend")
+
+CSS = b"""
+.bastille-step-done  { color: #3fb950; }
+.bastille-step-wait  { opacity: 0.45; }
+.bastille-warn       { background: rgba(210,153,34,0.15); border-radius: 10px;
+                       padding: 10px 14px; }
+.bastille-error      { background: rgba(248,81,73,0.15); border-radius: 10px;
+                       padding: 10px 14px; }
+.bastille-hero-title { font-size: 26pt; font-weight: 800; }
+"""
+
+
+def human_size(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1000 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}".replace(".0 ", " ")
+        n /= 1000
+
+
+def list_disks():
+    p = subprocess.run([BACKEND, "--list-disks"], capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr.strip() or "could not list disks")
+    return json.loads(p.stdout)
+
+
+def passphrase_strength(pw):
+    """Crude 0..4 score. The real defence is Argon2id; this just nudges length."""
+    if not pw:
+        return 0, ""
+    classes = sum(bool(re.search(p, pw)) for p in (r"[a-z]", r"[A-Z]", r"\d", r"[^\w\s]"))
+    words = len([w for w in re.split(r"[\s\-_.]+", pw) if w])
+    bits = len(pw) * 1.8 * (1 + 0.15 * (classes - 1))
+    if words >= 4 and len(pw) >= 20:
+        bits += 10
+    if len(pw) < 8:
+        return 1, "Too short"
+    if bits < 35:
+        return 1, "Weak"
+    if bits < 55:
+        return 2, "Fair"
+    if bits < 75:
+        return 3, "Good"
+    return 4, "Strong"
+
+
+# ── Pages ─────────────────────────────────────────────────────────────────────
+
+class Page(Gtk.Box):
+    """Base wizard page. Subclasses override validate()/on_show()."""
+    title = ""
+
+    def __init__(self, heading, blurb=None):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        self.set_margin_start(32); self.set_margin_end(32)
+        self.set_margin_top(20); self.set_margin_bottom(12)
+        h = Gtk.Label(label=heading, xalign=0)
+        h.add_css_class("title-2")
+        self.append(h)
+        if blurb:
+            b = Gtk.Label(label=blurb, xalign=0, wrap=True)
+            b.add_css_class("dim-label")
+            self.append(b)
+        self.on_change = lambda: None
+
+    def validate(self):
+        return None
+
+    def on_show(self):
+        pass
+
+
+def banner(text, css="bastille-warn", icon="dialog-warning-symbolic"):
+    box = Gtk.Box(spacing=10)
+    box.add_css_class(css)
+    box.append(Gtk.Image.new_from_icon_name(icon))
+    lbl = Gtk.Label(label=text, wrap=True, xalign=0, hexpand=True)
+    box.append(lbl)
+    box.label = lbl
+    return box
+
+
+class WelcomePage(Page):
+    title = "Welcome"
+
+    def __init__(self):
+        super().__init__("Install Bastille OS")
+        sp = Adw.StatusPage()
+        sp.set_icon_name("security-high-symbolic")
+        sp.set_title("Install Bastille OS")
+        sp.set_description(
+            "This installs Bastille to an internal or external disk with the "
+            "root filesystem encrypted by LUKS2 (Argon2id).\n\n"
+            "The disk you pick will be erased. Everything you need to do next "
+            "takes about five minutes.")
+        sp.set_vexpand(True)
+        self.remove(self.get_first_child())
+        self.append(sp)
+        note = Gtk.Label(
+            label="Running Bastille from a USB stick without installing "
+                  "(like Tails) needs no installation. Close this window to keep "
+                  "using the live system.", wrap=True)
+        note.add_css_class("dim-label"); note.add_css_class("caption")
+        self.append(note)
+
+
+class DiskPage(Page):
+    title = "Disk"
+
+    def __init__(self):
+        super().__init__("Choose a disk",
+                         "Everything on the selected disk will be erased.")
+        self.selected = None
+        self._group = None
+        self.group = Adw.PreferencesGroup()
+        self.append(self.group)
+        self.msg = Gtk.Label(xalign=0, wrap=True)
+        self.msg.add_css_class("dim-label")
+        self.append(self.msg)
+        refresh = Gtk.Button(label="Rescan disks")
+        refresh.set_halign(Gtk.Align.START)
+        refresh.connect("clicked", lambda *_: self.on_show())
+        self.append(refresh)
+        self._rows = []
+
+    def on_show(self):
+        for r in self._rows:
+            self.group.remove(r)
+        self._rows, self._group, self.selected = [], None, None
+        try:
+            disks = list_disks()
+        except Exception as e:  # noqa: BLE001
+            self.msg.set_text(f"Could not list disks: {e}")
+            self.on_change()
+            return
+        if not disks:
+            self.msg.set_text("No disks found. Attach a disk and press Rescan.")
+        else:
+            self.msg.set_text("")
+        for d in disks:
+            row = Adw.ActionRow()
+            row.set_title(d["model"])
+            kind = ("USB" if d["transport"] == "usb" else
+                    "NVMe" if d["transport"] == "nvme" else
+                    "SATA" if d["transport"] in ("sata", "ata") else
+                    (d["transport"].upper() or "Disk"))
+            sub = f"{d['path']}  ·  {human_size(d['size'])}  ·  {kind}"
+            if d["removable"]:
+                sub += "  ·  removable"
+            row.set_subtitle(sub)
+            row.add_prefix(Gtk.Image.new_from_icon_name(
+                "drive-removable-media-symbolic" if d["removable"] else "drive-harddisk-symbolic"))
+            radio = Gtk.CheckButton()
+            if self._group is None:
+                self._group = radio
+            else:
+                radio.set_group(self._group)
+            radio.set_valign(Gtk.Align.CENTER)
+            if d["live_medium"]:
+                row.set_subtitle(sub + "  ·  Bastille is running from this disk")
+                row.set_sensitive(False)
+            elif d["too_small"]:
+                row.set_subtitle(sub + "  ·  smaller than 8 GB")
+                row.set_sensitive(False)
+            else:
+                radio.connect("toggled", self._toggled, d)
+                row.set_activatable_widget(radio)
+            row.add_suffix(radio)
+            self.group.add(row)
+            self._rows.append(row)
+        self.on_change()
+
+    def _toggled(self, btn, disk):
+        if btn.get_active():
+            self.selected = disk
+            self.on_change()
+
+    def validate(self):
+        return None if self.selected else "Select a disk to continue."
+
+
+class PassphrasePage(Page):
+    title = "Encryption"
+
+    def __init__(self):
+        super().__init__(
+            "Disk encryption passphrase",
+            "You type this every time the computer starts. Nobody, including "
+            "the Bastille project, can recover it — if you forget it the data is gone.")
+        g = Adw.PreferencesGroup()
+        self.p1 = Adw.PasswordEntryRow(); self.p1.set_title("Passphrase")
+        self.p2 = Adw.PasswordEntryRow(); self.p2.set_title("Confirm passphrase")
+        g.add(self.p1); g.add(self.p2)
+        self.append(g)
+
+        self.bar = Gtk.LevelBar()
+        self.bar.set_min_value(0); self.bar.set_max_value(4)
+        self.bar.set_mode(Gtk.LevelBarMode.CONTINUOUS)
+        self.bar.add_offset_value("low", 1.5)
+        self.bar.add_offset_value("high", 3.5)
+        self.bar.add_offset_value("full", 4)
+        self.append(self.bar)
+        self.strength = Gtk.Label(xalign=0)
+        self.strength.add_css_class("caption")
+        self.append(self.strength)
+        tip = Gtk.Label(
+            label="Tip: four or five unrelated words are stronger and easier "
+                  "to remember than a short string of symbols.",
+            xalign=0, wrap=True)
+        tip.add_css_class("dim-label"); tip.add_css_class("caption")
+        self.append(tip)
+        self.p1.connect("changed", self._changed)
+        self.p2.connect("changed", self._changed)
+
+    def _changed(self, *_):
+        score, label = passphrase_strength(self.p1.get_text())
+        self.bar.set_value(score)
+        self.strength.set_text(label)
+        self.on_change()
+
+    def validate(self):
+        a, b = self.p1.get_text(), self.p2.get_text()
+        if len(a) < 8:
+            return "The passphrase must be at least 8 characters."
+        if a != b:
+            return "The two passphrases do not match."
+        return None
+
+    @property
+    def value(self):
+        return self.p1.get_text()
+
+
+class AccountPage(Page):
+    title = "Account"
+
+    def __init__(self):
+        super().__init__("Your account",
+                         "This account logs in to the desktop. It has no administrator rights by design.")
+        g = Adw.PreferencesGroup()
+        self.full = Adw.EntryRow(); self.full.set_title("Name")
+        self.user = Adw.EntryRow(); self.user.set_title("Username")
+        self.pw1 = Adw.PasswordEntryRow(); self.pw1.set_title("Password")
+        self.pw2 = Adw.PasswordEntryRow(); self.pw2.set_title("Confirm password")
+        for r in (self.full, self.user, self.pw1, self.pw2):
+            g.add(r)
+        self.append(g)
+
+        g2 = Adw.PreferencesGroup()
+        self.host = Adw.EntryRow(); self.host.set_title("Computer name")
+        self.host.set_text("bastille")
+        g2.add(self.host)
+        self.append(g2)
+        n = Gtk.Label(
+            label="Bastille picks a random computer name at every start so the "
+                  "machine cannot be tracked on a network by its name.",
+            xalign=0, wrap=True)
+        n.add_css_class("dim-label"); n.add_css_class("caption")
+        self.append(n)
+
+        self._user_touched = False
+        self.user.connect("changed", lambda *_: self._user_edit())
+        self.full.connect("changed", self._full_changed)
+        for r in (self.pw1, self.pw2, self.host):
+            r.connect("changed", lambda *_: self.on_change())
+
+    def _user_edit(self):
+        if getattr(self, "_auto", False):
+            return
+        self._user_touched = True
+        self.on_change()
+
+    def _full_changed(self, *_):
+        if not self._user_touched:
+            guess = re.sub(r"[^a-z0-9_-]", "", self.full.get_text().split(" ")[0].lower())
+            self._auto = True
+            self.user.set_text(guess)
+            self._auto = False
+        self.on_change()
+
+    def validate(self):
+        u = self.user.get_text()
+        if not re.match(r"^[a-z_][a-z0-9_-]{0,30}$", u):
+            return "Username: lowercase letters, digits, '-' and '_' only, starting with a letter."
+        if u in ("root", "user", "greeter"):
+            return "That username is reserved."
+        if not self.pw1.get_text():
+            return "Choose a password."
+        if self.pw1.get_text() != self.pw2.get_text():
+            return "The two passwords do not match."
+        if not re.match(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$", self.host.get_text() or "x"):
+            return "Computer name: letters, digits and '-' only."
+        return None
+
+
+class SummaryPage(Page):
+    title = "Review"
+
+    def __init__(self, wizard):
+        super().__init__("Ready to install",
+                         "Review the plan. The next button starts the installation and cannot be undone.")
+        self.w = wizard
+        self.group = Adw.PreferencesGroup()
+        self.append(self.group)
+        self._rows = []
+        self.warn = banner("")
+        self.append(self.warn)
+        confirm = Adw.ActionRow()
+        confirm.set_title("I understand that this disk will be erased")
+        self.switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.switch.connect("notify::active", lambda *_: self.on_change())
+        confirm.add_suffix(self.switch)
+        confirm.set_activatable_widget(self.switch)
+        g = Adw.PreferencesGroup(); g.add(confirm)
+        self.append(g)
+
+    def on_show(self):
+        for r in self._rows:
+            self.group.remove(r)
+        self._rows = []
+        d = self.w.disk_page.selected
+        a = self.w.account_page
+        for t, s in [
+            ("Install to", f"{d['model']}  ({d['path']}, {human_size(d['size'])})"),
+            ("Partitions", "512 MB EFI  ·  1 GB /boot  ·  rest encrypted LUKS2 root"),
+            ("Account", f"{a.full.get_text() or a.user.get_text()}  ({a.user.get_text()})"),
+            ("Computer name", a.host.get_text() or "bastille"),
+        ]:
+            r = Adw.ActionRow(); r.set_title(t); r.set_subtitle(s)
+            self.group.add(r); self._rows.append(r)
+        self.warn.label.set_text(
+            f"All data on {d['path']} will be permanently destroyed.")
+        self.switch.set_active(False)
+
+    def validate(self):
+        return None if self.switch.get_active() else "Confirm that the disk may be erased."
+
+
+STEP_IDS = [("check", "Checking the disk"), ("partition", "Partitioning"),
+            ("format", "Creating the encrypted volume"),
+            ("copy", "Copying system files"),
+            ("configure", "Configuring the system"),
+            ("initramfs", "Building the boot image"),
+            ("bootloader", "Installing the bootloader"),
+            ("finish", "Finishing up")]
+
+
+class ProgressPage(Page):
+    title = "Installing"
+
+    def __init__(self):
+        super().__init__("Installing Bastille OS",
+                         "This takes a few minutes. Do not turn the computer off.")
+        self.rows = {}
+        g = Adw.PreferencesGroup()
+        for sid, label in STEP_IDS:
+            row = Adw.ActionRow(); row.set_title(label)
+            img = Gtk.Image.new_from_icon_name("content-loading-symbolic")
+            img.add_css_class("bastille-step-wait")
+            row.add_prefix(img)
+            g.add(row)
+            self.rows[sid] = (row, img)
+        self.append(g)
+        self.bar = Gtk.ProgressBar(); self.append(self.bar)
+        ex = Gtk.Expander(label="Details")
+        self.tv = Gtk.TextView(editable=False, monospace=True, cursor_visible=False)
+        self.tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        sw = Gtk.ScrolledWindow(min_content_height=140)
+        sw.set_child(self.tv)
+        ex.set_child(sw)
+        self.append(ex)
+        self.sw = sw
+        self.error = banner("", "bastille-error", "dialog-error-symbolic")
+        self.error.set_visible(False)
+        self.append(self.error)
+        self._current = None
+
+    def log(self, msg):
+        buf = self.tv.get_buffer()
+        buf.insert(buf.get_end_iter(), msg + "\n")
+        adj = self.sw.get_vadjustment()
+        adj.set_value(adj.get_upper())
+
+    def set_step(self, sid, progress):
+        self.bar.set_fraction(progress)
+        if sid == self._current or sid not in self.rows:
+            return
+        order = [s for s, _ in STEP_IDS]
+        for s in order[:order.index(sid)]:
+            _, img = self.rows[s]
+            img.set_from_icon_name("emblem-ok-symbolic")
+            img.remove_css_class("bastille-step-wait"); img.add_css_class("bastille-step-done")
+        _, img = self.rows[sid]
+        img.set_from_icon_name("media-playback-start-symbolic")
+        img.remove_css_class("bastille-step-wait")
+        self._current = sid
+
+    def finish_ok(self):
+        for _, img in self.rows.values():
+            img.set_from_icon_name("emblem-ok-symbolic")
+            img.remove_css_class("bastille-step-wait"); img.add_css_class("bastille-step-done")
+        self.bar.set_fraction(1.0)
+
+    def finish_error(self, msg):
+        self.error.label.set_text(msg)
+        self.error.set_visible(True)
+
+
+class DonePage(Page):
+    title = "Done"
+
+    def __init__(self, wizard):
+        super().__init__("")
+        self.remove(self.get_first_child())
+        sp = Adw.StatusPage()
+        sp.set_icon_name("emblem-ok-symbolic")
+        sp.set_title("Installation complete")
+        sp.set_description("Remove the USB stick, then restart.\n"
+                           "You will be asked for the disk passphrase at every start.")
+        btn = Gtk.Button(label="Restart now")
+        btn.add_css_class("pill"); btn.add_css_class("suggested-action")
+        btn.set_halign(Gtk.Align.CENTER)
+        btn.connect("clicked", lambda *_: subprocess.Popen(["pkexec", "/sbin/reboot"])
+                    if os.geteuid() else subprocess.Popen(["/sbin/reboot"]))
+        sp.set_child(btn)
+        sp.set_vexpand(True)
+        self.append(sp)
+
+
+# ── Window ────────────────────────────────────────────────────────────────────
+
+class InstallWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app)
+        self.set_title("Install Bastille OS")
+        self.set_default_size(640, 700)
+
+        self.disk_page = DiskPage()
+        self.pass_page = PassphrasePage()
+        self.account_page = AccountPage()
+        self.summary_page = SummaryPage(self)
+        self.progress_page = ProgressPage()
+        self.done_page = DonePage(self)
+        self.pages = [WelcomePage(), self.disk_page, self.pass_page,
+                      self.account_page, self.summary_page,
+                      self.progress_page, self.done_page]
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.header = Adw.HeaderBar()
+        root.append(self.header)
+
+        self.stack = Gtk.Stack()
+        self.stack.set_vexpand(True)
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        for i, p in enumerate(self.pages):
+            p.on_change = self._update_nav
+            sw = Gtk.ScrolledWindow(); sw.set_child(p)
+            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            self.stack.add_named(sw, str(i))
+        root.append(self.stack)
+
+        self.hint = Gtk.Label(xalign=0)
+        self.hint.add_css_class("caption"); self.hint.add_css_class("dim-label")
+        self.hint.set_margin_start(32)
+        root.append(self.hint)
+
+        bar = Gtk.Box(spacing=8)
+        bar.set_margin_start(24); bar.set_margin_end(24)
+        bar.set_margin_top(8); bar.set_margin_bottom(16)
+        self.back = Gtk.Button(label="Back")
+        self.back.connect("clicked", self._go_back)
+        self.next = Gtk.Button(label="Continue")
+        self.next.add_css_class("pill"); self.next.add_css_class("suggested-action")
+        self.next.connect("clicked", self._go_next)
+        spacer = Gtk.Box(hexpand=True)
+        bar.append(self.back); bar.append(spacer); bar.append(self.next)
+        root.append(bar)
+        self.set_content(root)
+
+        self.idx = 0
+        self._show(0)
+
+    # navigation ---------------------------------------------------------
+    def _show(self, i, forward=True):
+        self.idx = i
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT if forward
+                                       else Gtk.StackTransitionType.SLIDE_RIGHT)
+        self.stack.set_visible_child_name(str(i))
+        self.pages[i].on_show()
+        self._update_nav()
+
+    def _update_nav(self):
+        i = self.idx
+        page = self.pages[i]
+        installing = page is self.progress_page
+        done = page is self.done_page
+        self.back.set_visible(0 < i < 5)
+        self.next.set_visible(not installing and not done)
+        err = page.validate() if not installing and not done else None
+        self.next.set_sensitive(err is None)
+        self.hint.set_text(err or "")
+        last_review = page is self.summary_page
+        self.next.set_label("Install" if last_review else "Continue")
+        for c in ("suggested-action", "destructive-action"):
+            self.next.remove_css_class(c)
+        self.next.add_css_class("destructive-action" if last_review else "suggested-action")
+
+    def _go_back(self, *_):
+        self._show(self.idx - 1, forward=False)
+
+    def _go_next(self, *_):
+        if self.pages[self.idx] is self.summary_page:
+            self._start_install()
+            return
+        self._show(self.idx + 1)
+
+    # install ------------------------------------------------------------
+    def _start_install(self):
+        self._show(5)
+        a = self.account_page
+        cfg = {
+            "disk": self.disk_page.selected["path"],
+            "confirm": self.disk_page.selected["path"],
+            "passphrase": self.pass_page.value,
+            "username": a.user.get_text(),
+            "fullname": a.full.get_text(),
+            "password": a.pw1.get_text(),
+            "hostname": a.host.get_text() or "bastille",
+        }
+        threading.Thread(target=self._run_backend, args=(cfg,), daemon=True).start()
+
+    def _run_backend(self, cfg):
+        cmd = [BACKEND, "--install"]
+        if os.geteuid() != 0:
+            cmd = ["pkexec"] + cmd
+        pp = self.progress_page
+        try:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True)
+            proc.stdin.write(json.dumps(cfg) + "\n")
+            proc.stdin.close()
+        except Exception as e:  # noqa: BLE001
+            GLib.idle_add(pp.finish_error, f"Could not start the installer: {e}")
+            return
+        ok = False
+        failed = None
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                GLib.idle_add(pp.log, line)
+                continue
+            kind = ev.get("event")
+            if kind == "step":
+                GLib.idle_add(pp.set_step, ev["id"], ev.get("progress", 0))
+            elif kind == "log":
+                GLib.idle_add(pp.log, ev["msg"])
+            elif kind == "error":
+                failed = ev["msg"]
+            elif kind == "done":
+                ok = True
+        rc = proc.wait()
+        if ok:
+            GLib.idle_add(pp.finish_ok)
+            GLib.idle_add(self._show, 6)
+        else:
+            if failed is None:
+                failed = ("Authentication was cancelled." if rc in (126, 127)
+                          else f"The installer stopped unexpectedly (exit {rc}).")
+            GLib.idle_add(pp.finish_error, failed)
+            GLib.idle_add(self._allow_retry)
+
+    def _allow_retry(self):
+        self.back.set_visible(True)
+        self.back.set_label("Start over")
+        self.back.disconnect_by_func(self._go_back)
+        self.back.connect("clicked", lambda *_: self._reset())
+
+    def _reset(self):
+        self.back.set_label("Back")
+        self.back.connect("clicked", self._go_back)
+        self.progress_page.error.set_visible(False)
+        self.progress_page._current = None
+        self._show(1, forward=False)
+
+
+class InstallApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.connect("activate", self._activate)
+
+    def _activate(self, app):
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        css = Gtk.CssProvider()
+        css.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        InstallWindow(app).present()
+
+
+if __name__ == "__main__":
+    sys.exit(InstallApp().run(sys.argv))
