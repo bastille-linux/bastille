@@ -43,6 +43,17 @@ jobs:
         shell: bash
         run: bash build.sh --architectures amd64 2>&1 | tee /tmp/bastille-build.log || { tail -20 /tmp/bastille-build.log; exit 1; }
 
+      - name: Diagnose failed build
+        if: failure()
+        run: |
+          echo "=== init-related packages in the chroot ==="
+          chroot build/chroot dpkg -l 2>/dev/null | grep -E "systemd|elogind|sysv|openrc|insserv|initscripts|^ii +init " | awk '{print $1, $2, $3}' || true
+          echo "=== who depends on systemd-sysv here ==="
+          chroot build/chroot apt-cache rdepends --installed systemd-sysv 2>/dev/null | head -20 || true
+          echo "=== chroot package list seen by apt ==="
+          cat build/chroot/root/packages.chroot 2>/dev/null | head -5 || true
+          ls build/config/package-lists/ || true
+
       - name: Extract squashfs and compute checksums
         run: |
           ls -lh build/live-image-amd64.hybrid.iso

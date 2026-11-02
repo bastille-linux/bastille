@@ -32,6 +32,7 @@ rc-update add usbguard            default || true
 rc-update add NetworkManager      default || true
 rc-update add seatd               boot    || true
 rc-update add dbus                default || true
+rc-update add elogind             default || true
 rc-update add greetd              default || true
 rc-update add bastille-tlsdate         default || true
 rc-update add bastille-ramwipe    shutdown || true

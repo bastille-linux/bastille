@@ -16,9 +16,16 @@ ca-certificates
 curl
 wget
 
-# seatd — seat management for Sway, no logind/elogind dependency needed
+# seatd — seat management for Sway
 seatd
 libseat1
+
+# elogind: the logind provider for a sysvinit system. On trixie libpam-systemd
+# hard-depends on systemd-sysv (which conflicts with sysvinit-core), and polkitd's
+# default logind is libpam-systemd, so name elogind explicitly. It also creates
+# XDG_RUNTIME_DIR for logins.
+elogind
+libpam-elogind
 
 # Sway Wayland compositor stack
 sway
