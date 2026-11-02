@@ -103,7 +103,8 @@ command_args="watch"
 command_background="yes"
 pidfile="/run/bastille-network-guard.pid"
 depend() {
-    need net
+    use networking
+    after networking
     after wg-quick.wg0
 }
 EOF

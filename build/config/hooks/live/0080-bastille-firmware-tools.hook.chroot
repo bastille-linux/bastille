@@ -71,7 +71,7 @@ command="/usr/local/sbin/bastille-firmware-audit"
 command_args="--quiet"
 command_background="no"
 depend() {
-    need localmount
+    after mountall.sh
     before net
 }
 EOF

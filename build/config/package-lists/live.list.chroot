@@ -1,4 +1,6 @@
 live-boot
 live-config
-live-config-systemd
+live-config-sysvinit
 systemd-sysv
+# live-config only creates the live user if this package is installed
+user-setup

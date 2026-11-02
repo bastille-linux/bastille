@@ -1,34 +1,40 @@
 #!/bin/sh
 # Runs AFTER all packages are installed.
-# Switches PID-1 from systemd-sysv to sysvinit-core and adds openrc.
+# Switches PID-1 from systemd-sysv to sysvinit-core + OpenRC.
 #
-# Key insight: openrc does NOT conflict with systemd-sysv in Debian 12.
-# sysvinit-core DOES conflict with systemd-sysv.
-# So the correct order is:
-#   1. Install openrc (and all its deps) while systemd-sysv is still present
-#   2. Force-purge systemd-sysv
-#   3. Install sysvinit-core (conflict gone)
+# History: earlier revisions force-purged systemd-sysv and then ran
+# `apt-get -f install`. apt resolved the broken `init` dependency by picking
+# the FIRST alternative (systemd-sysv), silently reinstalling it, so the image
+# booted systemd and none of the OpenRC services ever started.
+#
+# The supported swap is simply to install sysvinit-core: it Conflicts with
+# systemd-sysv, so apt removes systemd-sysv and keeps `init` satisfied.
+# Debian's openrc package ships /etc/init.d/rc{,S} wrappers that sysvinit's
+# default /etc/inittab calls, so no inittab surgery is needed.
 set -e
 
 export DEBIAN_FRONTEND=noninteractive
 
-# ── 1. Install openrc and its full dep chain (no conflict with systemd-sysv) ──
 apt-get -y --no-install-recommends install openrc
+apt-get -y --no-install-recommends install sysvinit-core sysvinit-utils initscripts
 
-# ── 2. Force-purge systemd-sysv (the PID-1 init symlink) ─────────────────────
-# sysvinit-core conflicts with systemd-sysv, so remove it first.
-# Keep the base systemd package — libsystemd0 satisfies many other packages.
-if dpkg -l systemd-sysv 2>/dev/null | grep -q '^ii'; then
-    dpkg --force-depends --force-remove-essential --purge systemd-sysv
+# live-config must use its sysvinit backend, otherwise the live user, hostname
+# and ssh host keys are never created at boot (the systemd backend is a unit).
+apt-get -y --no-install-recommends install live-config-sysvinit
+
+# ── Fail the build loudly if PID 1 is still systemd ───────────────────────────
+if dpkg-query -W -f='${Status}' systemd-sysv 2>/dev/null | grep -q 'install ok installed'; then
+    echo "[0001] FATAL: systemd-sysv is still installed" >&2
+    exit 1
 fi
+if ! dpkg-query -W -f='${Status}' sysvinit-core 2>/dev/null | grep -q 'install ok installed'; then
+    echo "[0001] FATAL: sysvinit-core is not installed" >&2
+    exit 1
+fi
+if readlink -f /sbin/init | grep -q systemd; then
+    echo "[0001] FATAL: /sbin/init -> $(readlink -f /sbin/init)" >&2
+    exit 1
+fi
+[ -f /etc/inittab ] || { echo "[0001] FATAL: no /etc/inittab" >&2; exit 1; }
 
-# ── 3. Fix broken 'init' metapackage, then install sysvinit-core ──────────────
-# After purging systemd-sysv, 'init' is left with an unmet dep.
-# apt-get -f install (no packages) resolves it automatically:
-# with systemd-sysv gone, the only candidate is sysvinit-core.
-apt-get -y -f --no-install-recommends install
-
-# Now install remaining sysvinit pieces cleanly
-apt-get -y --no-install-recommends install sysvinit-utils initscripts
-
-echo "[0001] sysvinit-core + openrc installed, systemd-sysv purged"
+echo "[0001] sysvinit-core + openrc + live-config-sysvinit installed, systemd-sysv removed"

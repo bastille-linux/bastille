@@ -5,7 +5,8 @@ description="WireGuard VPN (wg0)"
 WG_CONF="/etc/wireguard/wg0.conf"
 
 depend() {
-    need net
+    use networking
+    after networking
     after nftables thl-dns-lock
 }
 

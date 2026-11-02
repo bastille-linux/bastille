@@ -1,0 +1,29 @@
+#!/sbin/openrc-run
+# greetd login manager. Debian's greetd package only ships a systemd unit, so
+# this OpenRC script is what actually starts the auto-login Sway session.
+
+description="greetd login manager (auto-login Sway session)"
+# Debian's start-stop-daemon has no --stdout/--stderr, so redirect via sh.
+command="/bin/sh"
+command_args="-c 'exec /usr/sbin/greetd --config /etc/greetd/config.toml >>/var/log/greetd.log 2>&1'"
+command_background="yes"
+pidfile="/run/greetd.pid"
+
+depend() {
+    need seatd dbus
+    after mountall.sh
+    after udev bootmisc bastille-hostname live-config
+    keyword -timeout
+}
+
+start_pre() {
+    # There is no logind/elogind to create XDG_RUNTIME_DIR, so do it here for
+    # the live user. bastille-session falls back to /tmp if this is missing.
+    getent passwd | while IFS=: read -r name _ uid gid _; do
+        if [ "$uid" -ge 1000 ] && [ "$uid" -lt 60000 ]; then
+            checkpath --directory --owner "$name" --mode 0700 "/run/user/${uid}"
+        fi
+    done
+    checkpath --directory --owner root:root --mode 0755 /run/greetd
+    return 0
+}

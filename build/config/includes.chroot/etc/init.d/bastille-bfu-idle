@@ -10,7 +10,7 @@ command_user="user"
 
 depend() {
     after elogind
-    need localmount
+    after mountall.sh
 }
 
 start_pre() {

@@ -1,7 +1,8 @@
 [terminal]
-vt = 1
+# Gettys from inittab own tty1-6, so greetd takes VT7.
+vt = 7
 
 [default_session]
-# tuigreet: TUI greeter with clock, hostname, user list; from bookworm-backports
-command = "tuigreet --time --remember --asterisks --greeting 'Bastille OS' --cmd sway"
-user = "greeter"
+# Live system: auto-login straight into Sway as the live user.
+command = "/usr/local/bin/bastille-session"
+user = "user"

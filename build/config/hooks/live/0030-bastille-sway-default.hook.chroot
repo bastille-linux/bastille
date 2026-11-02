@@ -22,7 +22,7 @@ set $menu wofi --show run
 set $lock swaylock -f -c 000000
 
 # ── Output ──────────────────────────────────────────────────────────────────
-output * bg #000000 solid_color
+output * bg #1d2a44 solid_color
 
 # ── Input ───────────────────────────────────────────────────────────────────
 input type:keyboard {
@@ -42,7 +42,10 @@ exec swayidle -w \
 
 # ── Startup ──────────────────────────────────────────────────────────────────
 exec mako
-exec waybar
+# polkit agent: pkexec dialogs (installer, settings) need one in the session
+exec lxpolkit
+# Always open a terminal on login so a live session is visibly alive
+exec foot
 
 # ── Key bindings ─────────────────────────────────────────────────────────────
 bindsym $mod+Return exec $term

@@ -6,7 +6,8 @@
 description="Bastille OS update availability check"
 
 depend() {
-    need net
+    use networking
+    after networking
     after network-online
 }
 

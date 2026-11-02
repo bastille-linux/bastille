@@ -1,0 +1,39 @@
+#!/bin/sh
+# Session wrapper started by greetd. There is no logind/elogind on Bastille, so
+# nothing sets XDG_RUNTIME_DIR or a session D-Bus for us; sway cannot start
+# without the former.
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+uid=$(id -u)
+
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    XDG_RUNTIME_DIR="/run/user/${uid}"
+    if [ ! -d "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
+        XDG_RUNTIME_DIR="/tmp/xdg-runtime-${uid}"
+        mkdir -p -m 0700 "$XDG_RUNTIME_DIR"
+    fi
+fi
+export XDG_RUNTIME_DIR
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=sway
+export XDG_SESSION_DESKTOP=sway
+export LIBSEAT_BACKEND=seatd
+export LIBSEAT_LOGLEVEL=debug
+
+# Software rendering + legacy KMS: works on virtio-gpu (UTM/QEMU), VirtualBox
+# and bare metal alike.
+export WLR_RENDERER="${WLR_RENDERER:-pixman}"
+export WLR_NO_HARDWARE_CURSORS="${WLR_NO_HARDWARE_CURSORS:-1}"
+export WLR_DRM_NO_ATOMIC="${WLR_DRM_NO_ATOMIC:-1}"
+
+mkdir -p "$HOME/.local/state" 2>/dev/null
+dbus-run-session -- sway --unsupported-gpu >"$HOME/.local/state/sway.log" 2>&1
+rc=$?
+
+# Sway exited (crash or user quit). Show why on this VT instead of a blank
+# screen, then hand over to a shell so the live system stays debuggable.
+echo "bastille-session: sway exited with status $rc"
+tail -n 40 "$HOME/.local/state/sway.log" 2>/dev/null
+echo "--- seatd.log (tail) ---"
+tail -n 30 /var/log/seatd.log 2>/dev/null
+echo "--- dropping to shell (type 'exit' to restart the session) ---"
+exec /bin/bash -l

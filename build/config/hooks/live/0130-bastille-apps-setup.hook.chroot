@@ -38,6 +38,7 @@ for bin in \
     /usr/local/bin/bastille-weather \
     /usr/local/bin/bastille-maps \
     /usr/local/bin/bastille-update \
+    /usr/local/bin/bastille-install \
     /usr/local/bin/bastille-subsystem; do
     [ -f "$bin" ] && chmod 755 "$bin"
 done
@@ -50,7 +51,6 @@ for sbin in \
     /usr/local/sbin/bastille-set-wg \
     /usr/local/sbin/bastille-set-dns \
     /usr/local/sbin/bastille-update \
-    /usr/local/sbin/bastille-install \
     /usr/local/sbin/bastille-subsystem-root; do
     [ -f "$sbin" ] && chmod 700 "$sbin" && chown root:root "$sbin"
 done
@@ -79,11 +79,14 @@ update-desktop-database /usr/share/applications 2>/dev/null || true
 # creates the seat session itself so Sway inherits it cleanly via seatd.
 cat > /etc/greetd/config.toml << 'TOML'
 [terminal]
-vt = 1
+# Gettys from inittab own tty1-6, so greetd takes VT7.
+vt = 7
 
 [default_session]
-command = "env WLR_NO_HARDWARE_CURSORS=1 WLR_RENDERER=pixman WLR_DRM_NO_ATOMIC=1 sway"
+command = "/usr/local/bin/bastille-session"
 user = "user"
 TOML
+chmod 755 /usr/local/bin/bastille-session /etc/init.d/greetd \
+    /usr/local/sbin/bastille-install-backend
 
 echo "bastille-apps-setup: done"

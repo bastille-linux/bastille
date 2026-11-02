@@ -11,7 +11,8 @@ command_user="_dnscrypt-proxy"
 command_background="yes"
 
 depend() {
-    need net
+    use networking
+    after networking
     before nftables thl-dns-lock
     use logger
 }
