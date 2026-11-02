@@ -11,8 +11,9 @@ depend() {
 
 start() {
     ebegin "Starting tlsdate NTP service"
-    /usr/bin/tlsdate -s
-    eend $?
+    # Run in background — network may not be ready; don't block boot
+    /usr/bin/tlsdate -s &
+    eend 0
 }
 
 stop() {
