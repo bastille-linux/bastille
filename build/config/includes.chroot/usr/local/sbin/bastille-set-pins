@@ -47,9 +47,16 @@ def main():
     parser.add_argument("--type", required=True,
                         choices=["login", "duress", "fake-duress", "dsm"],
                         dest="pin_type")
-    parser.add_argument("--pin", required=True)
+    parser.add_argument("--pin", default=None)
+    parser.add_argument("--pin-stdin", action="store_true",
+                        help="read the PIN from stdin (keeps it out of argv)")
     parser.add_argument("--clear", action="store_true")
     args = parser.parse_args()
+
+    if args.pin_stdin:
+        args.pin = sys.stdin.readline().rstrip("\n")
+    if args.pin is None:
+        die("--pin or --pin-stdin required")
 
     if not args.clear and (len(args.pin) < 4 or not args.pin.isdigit()):
         die("PIN must be 4+ digits")

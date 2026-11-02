@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""bastille-install — Bastille OS disk installer (GTK4 / libadwaita wizard).
+"""bastille-install — Bastille OS installer (GTK4 / libadwaita).
 
-This is only the front end. The privileged work is done by
-/usr/local/sbin/bastille-install-backend, which this window drives over a
-pipe (JSON lines). Written against libadwaita 1.2 so it runs on Debian 12
-as well as newer bases.
+Front end only. The privileged work is done by
+/usr/local/sbin/bastille-install-backend, which this window drives over a pipe
+(JSON lines). Layout follows the Bastille Settings app: a step list on the
+left, card rows on the right.
 """
 
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
+gi.require_version('Gdk', '4.0')
+gi.require_version('GdkPixbuf', '2.0')
 
 import json
 import os
@@ -18,27 +20,291 @@ import subprocess
 import sys
 import threading
 
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk
 
 APP_ID = "org.bastilleos.Installer"
 BACKEND = os.environ.get("BASTILLE_INSTALL_BACKEND",
                          "/usr/local/sbin/bastille-install-backend")
 
-CSS = b"""
-.bastille-step-done  { color: #3fb950; }
-.bastille-step-wait  { opacity: 0.45; }
-.bastille-warn       { background: rgba(210,153,34,0.15); border-radius: 10px;
-                       padding: 10px 14px; }
-.bastille-error      { background: rgba(248,81,73,0.15); border-radius: 10px;
-                       padding: 10px 14px; }
-.bastille-hero-title { font-size: 26pt; font-weight: 800; }
+# ── Design tokens (same palette as the Settings app) ──────────────────────────
+TONES = {          # tone: (chip background, icon colour)
+    "gn": ("rgba(0,147,0,0.10)", "#3fb950"),
+    "bl": ("rgba(42,120,214,0.10)", "#2a78d6"),
+    "am": ("rgba(250,178,25,0.10)", "#fab219"),
+    "rd": ("rgba(208,59,59,0.10)", "#d03b3b"),
+    "pu": ("rgba(100,40,160,0.15)", "#9333ea"),
+    "":   ("rgba(255,255,255,0.05)", "#898781"),
+}
+
+CSS = """
+window.bastille { background: #0b0b0b; color: #f0efec; }
+window.bastille headerbar { background: #151515; border-bottom: 1px solid rgba(255,255,255,0.10);
+                            box-shadow: none; min-height: 40px; }
+.nav { background: #151515; border-right: 1px solid rgba(255,255,255,0.10); padding: 10px 8px; }
+.nav-label { font-size: 10px; font-weight: 600; color: #898781; letter-spacing: 0.06em;
+             padding: 10px 8px 4px; }
+.nav-item { border-radius: 8px; padding: 7px 10px; color: #c3c2b7; font-size: 13px; }
+.nav-item.active { background: rgba(42,120,214,0.12); color: #f0efec; }
+.panel-header { padding: 20px 0 16px; border-bottom: 1px solid rgba(255,255,255,0.10); }
+.panel-title { font-size: 18px; font-weight: 600; color: #f0efec; }
+.panel-sub { font-size: 12px; color: #898781; }
+.section-title { font-size: 11px; font-weight: 600; color: #898781; letter-spacing: 0.06em; }
+.bcard { background: #151515; border: 1px solid rgba(255,255,255,0.10); border-radius: 8px;
+         overflow: hidden; }
+.bcard.warn { background: rgba(250,178,25,0.06); border-color: rgba(250,178,25,0.30); }
+.bcard.crit { background: rgba(208,59,59,0.06); border-color: rgba(208,59,59,0.30); }
+.bcard.log  { background: #080808; }
+.brow { padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.10); }
+.brow:last-child { border-bottom: none; }
+.brow.selected { background: rgba(42,120,214,0.08); }
+.brow.dim { opacity: 0.55; }
+.chip { border-radius: 6px; min-width: 28px; min-height: 28px; }
+.row-label { font-size: 13px; color: #f0efec; }
+.row-label.muted { color: #898781; }
+.row-desc { font-size: 11px; color: #898781; }
+.mono { font-family: monospace; }
+.badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; }
+.badge-ok   { background: rgba(0,147,0,0.14);   color: #3fb950; border: 1px solid rgba(0,147,0,0.25); }
+.badge-warn { background: rgba(250,178,25,0.14); color: #fab219; border: 1px solid rgba(250,178,25,0.25); }
+.badge-off  { background: rgba(255,255,255,0.07); color: #898781; border: 1px solid rgba(255,255,255,0.10); }
+.badge-crit { background: rgba(208,59,59,0.14);  color: #f47070; border: 1px solid rgba(208,59,59,0.30); }
+.badge-run  { background: rgba(42,120,214,0.14); color: #6aa8f0; border: 1px solid rgba(42,120,214,0.30); }
+.footer { background: #151515; border-top: 1px solid rgba(255,255,255,0.10); padding: 0 24px; }
+.footer .hint { font-size: 12px; color: #898781; }
+button.btn { min-height: 32px; padding: 0 16px; border-radius: 6px; background: #1a1a19;
+             border: 1px solid rgba(255,255,255,0.10); color: #f0efec; font-weight: 500;
+             font-size: 13px; box-shadow: none; background-image: none; }
+button.btn:hover { background: #222221; }
+button.btn.small { min-height: 26px; padding: 0 12px; font-size: 12px; }
+button.btn-pri { background: #2a78d6; border-color: #2a78d6; color: #ffffff; }
+button.btn-pri:hover { background: #3385e3; }
+button.btn-dng { background: #d03b3b; border-color: #d03b3b; color: #ffffff; }
+button.btn-dng:hover { background: #dc4a4a; }
+button.btn-ok  { background: rgba(0,147,0,0.14); border-color: rgba(0,147,0,0.30); color: #3fb950; }
+button.btn:disabled { opacity: 0.45; }
+entry.inp, passwordentry.inp, passwordentry.inp text, entry.inp text {
+    background: #1a1a19; color: #f0efec; }
+entry.inp, passwordentry.inp { border: 1px solid rgba(255,255,255,0.10); border-radius: 6px;
+                               min-height: 30px; padding: 0 6px; box-shadow: none; }
+entry.inp:focus-within, passwordentry.inp:focus-within { border-color: #2a78d6; }
+.seg { min-height: 6px; border-radius: 3px; background: #1e1e1d; }
+.seg.on-1 { background: #d03b3b; } .seg.on-2 { background: #fab219; }
+.seg.on-3 { background: #3fb950; } .seg.on-4 { background: #3fb950; }
+.part { border-radius: 6px; padding: 7px 10px; font-size: 11px; color: #c3c2b7; }
+.part-efi  { background: #2b2b2a; } .part-boot { background: #35353a; }
+.part-root { background: rgba(0,147,0,0.28); color: #7ee08a; }
+progressbar.bar trough { min-height: 8px; border-radius: 4px; background: #1e1e1d; }
+progressbar.bar progress { min-height: 8px; border-radius: 4px; background: #2a78d6; }
+checkbutton.radio check { border-radius: 50%; min-width: 14px; min-height: 14px;
+                          border: 2px solid #3a3a38; background: transparent; }
+checkbutton.radio check:checked { border-color: #2a78d6; background: #2a78d6; }
+dropdown.inp button { background: #1a1a19; border: 1px solid rgba(255,255,255,0.10);
+                      border-radius: 6px; min-height: 30px; box-shadow: none; }
 """
+
+ICONS = {
+    "shield": "M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z",
+    "disk": "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6",
+    "lock": "M6 11h12v9H6zM9 11V8a3 3 0 016 0v3",
+    "user": "M12 4a4 4 0 100 8 4 4 0 000-8zM5 20c0-3.3 3.1-6 7-6s7 2.7 7 6",
+    "apps": "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 17h6M17 14v6",
+    "list": "M4 6l1.5 1.5L8 5M4 13l1.5 1.5L8 12M11 6h9M11 13h9M4 19h.01M11 19h9",
+    "down": "M12 4v11M7 11l5 5 5-5M5 20h14",
+    "ok": "M12 3a9 9 0 100 18 9 9 0 000-18zM8 12l3 3 5-6",
+    "check": "M5 12l5 5 9-10",
+    "prof": "M9 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3 2.7-5 6-5s6 2 6 5M16 5.2a3 3 0 010 5.6M21 20c0-2.3-1.5-4-4-4.6",
+    "acct": "M12 16a4 4 0 100-8 4 4 0 000-8zM16 8v5a2.5 2.5 0 005 0v-1a9 9 0 10-3.5 7.1",
+    "pin": "M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6zM9 12h.01M12 12h.01M15 12h.01",
+    "globe": "M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18",
+    "ram": "M4 8h16v8H4zM8 12h.01M12 12h.01M16 12h.01M7 16v3M12 16v3M17 16v3",
+    "usb": "M9 3h6v5H9zM12 8v11M8 19h8",
+    "chip": "M7 7h10v10H7zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4",
+    "warn": "M12 4l9 16H3zM12 10v4M12 17h.01",
+    "info": "M12 3a9 9 0 100 18 9 9 0 000-18zM12 8h.01M12 11v5",
+    "key": "M7 14a4 4 0 110-8 4 4 0 010 8zM10 11h10M17 11v3M20 11v2",
+    "ssd": "M3 7h18v10H3zM7 14h4M18 12h.01",
+    "stick": "M8 3h8v18H8zM11 7h2M11 10h2",
+    "mail": "M4 6h16v12H4zM4 7l8 6 8-6",
+    "msg": "M4 5h16v11H9l-5 4z",
+    "msg2": "M4 5h16v11H9l-5 4zM8 10h8",
+    "spark": "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z",
+    "vpn": "M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6zM9 12l2 2 4-4",
+    "cal": "M5 6h14v14H5zM5 10h14M9 3v4M15 3v4",
+    "folder": "M3 7h6l2 2h10v10H3z",
+    "notes": "M6 4h12v16H6zM9 9h6M9 13h6",
+    "doc": "M7 3h8l4 4v14H7zM15 3v4h4M10 13h6M10 17h6",
+    "table": "M4 5h16v14H4zM4 10h16M10 5v14",
+    "slides": "M4 4h16v11H4zM12 15v5M8 20h8",
+    "map": "M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14",
+    "music": "M9 18V6l10-2v12M9 18a3 3 0 11-6 0 3 3 0 016 0zM19 16a3 3 0 11-6 0 3 3 0 016 0z",
+    "cloud": "M7 18a4 4 0 010-8 5 5 0 019.5 1A3.5 3.5 0 0117 18z",
+    "term": "M4 5h16v14H4zM8 10l3 2-3 2M13 15h3",
+    "spin": "M12 3a9 9 0 019 9",
+    "dot": "M12 12h.01",
+    "chev": "M9 6l6 6-6 6",
+    "plus": "M12 5v14M5 12h14",
+}
+
+_tex_cache = {}
+
+
+def icon(name, color="#c3c2b7", size=16):
+    """Stroke icon (24px grid) rendered crisply at 4x and shown at `size`."""
+    key = (name, color, size)
+    tex = _tex_cache.get(key)
+    if tex is None:
+        px = size * 4
+        svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
+               f'width="{px}" height="{px}" fill="none" stroke="{color}" stroke-width="1.8" '
+               f'stroke-linecap="round" stroke-linejoin="round"><path d="{ICONS[name]}"/></svg>')
+        loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
+        loader.write(svg.encode())
+        loader.close()
+        tex = Gdk.Texture.new_for_pixbuf(loader.get_pixbuf())
+        _tex_cache[key] = tex
+    img = Gtk.Image.new_from_paintable(tex)
+    img.set_pixel_size(size)
+    return img
+
+
+# ── Small widget helpers ──────────────────────────────────────────────────────
+
+def load_css(provider, css):
+    if hasattr(provider, "load_from_string"):
+        provider.load_from_string(css)
+    else:
+        provider.load_from_data(css.encode())
+
+
+def label(text="", css=(), xalign=0.0, wrap=False):
+    lbl = Gtk.Label(label=text, xalign=xalign, wrap=wrap)
+    for c in ([css] if isinstance(css, str) else css):
+        lbl.add_css_class(c)
+    return lbl
+
+
+def badge(text, kind="off"):
+    b = label(text, ("badge", f"badge-{kind}"))
+    b.set_valign(Gtk.Align.CENTER)
+    return b
+
+
+def set_badge(b, text, kind):
+    for k in ("ok", "warn", "off", "crit", "run"):
+        b.remove_css_class(f"badge-{k}")
+    b.add_css_class(f"badge-{kind}")
+    b.set_text(text)
+
+
+def button(text, kind="", small=False):
+    b = Gtk.Button(label=text)
+    b.add_css_class("btn")
+    if kind:
+        b.add_css_class(f"btn-{kind}")
+    if small:
+        b.add_css_class("small")
+    b.set_valign(Gtk.Align.CENTER)
+    return b
+
+
+def chip(tone, name):
+    bg, fg = TONES.get(tone, TONES[""])
+    box = Gtk.Box(halign=Gtk.Align.START, valign=Gtk.Align.CENTER, hexpand=False)
+    box.add_css_class("chip")
+    box.set_size_request(28, 28)
+    prov = Gtk.CssProvider()
+    load_css(prov, f"* {{ background: {bg}; }}")
+    box.get_style_context().add_provider(prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    inner = icon(name, fg, 14)
+    inner.set_halign(Gtk.Align.CENTER)
+    inner.set_valign(Gtk.Align.CENTER)
+    inner.set_margin_start(7)
+    inner.set_margin_end(7)
+    inner.set_margin_top(7)
+    inner.set_margin_bottom(7)
+    box.append(inner)
+    return box
+
+
+class Row(Gtk.Box):
+    """One card row: [chip] label/description ........ suffix widgets."""
+
+    def __init__(self, text, desc=None, tone=None, icon_name=None, suffix=(),
+                 mono_desc=False, muted=False):
+        super().__init__(spacing=12)
+        self.add_css_class("brow")
+        self.chip = None
+        if icon_name:
+            self.chip = chip(tone or "", icon_name)
+            self.append(self.chip)
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True,
+                      valign=Gtk.Align.CENTER)
+        self.title = label(text, ("row-label", "muted") if muted else "row-label", wrap=True)
+        col.append(self.title)
+        self.desc = None
+        if desc is not None:
+            self.desc = label(desc, ("row-desc", "mono") if mono_desc else "row-desc", wrap=True)
+            col.append(self.desc)
+        self.append(col)
+        for w in suffix:
+            self.append(w)
+
+    def set_desc(self, text):
+        if self.desc:
+            self.desc.set_text(text)
+
+    def on_click(self, fn):
+        g = Gtk.GestureClick()
+        g.connect("released", lambda *_: fn())
+        self.add_controller(g)
+        self.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+
+
+class Card(Gtk.Box):
+    def __init__(self, *rows, css=""):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.add_css_class("bcard")
+        if css:
+            self.add_css_class(css)
+        for r in rows:
+            self.append(r)
+
+    def clear(self):
+        while (c := self.get_first_child()) is not None:
+            self.remove(c)
+
+
+def section(title, *children):
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    if title:
+        t = label(title.upper(), "section-title")
+        t.set_margin_start(2)
+        box.append(t)
+    for c in children:
+        box.append(c)
+    return box
+
+
+def password_entry(width=260):
+    e = Gtk.PasswordEntry(show_peek_icon=True)
+    e.add_css_class("inp")
+    e.set_size_request(width, -1)
+    e.set_valign(Gtk.Align.CENTER)
+    return e
+
+
+def text_entry(text="", width=260):
+    e = Gtk.Entry(text=text)
+    e.add_css_class("inp")
+    e.set_size_request(width, -1)
+    e.set_valign(Gtk.Align.CENTER)
+    return e
 
 
 def human_size(n):
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if n < 1000 or unit == "TB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}".replace(".0 ", " ")
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
         n /= 1000
 
 
@@ -50,7 +316,7 @@ def list_disks():
 
 
 def passphrase_strength(pw):
-    """Crude 0..4 score. The real defence is Argon2id; this just nudges length."""
+    """0..4 score, label. A nudge toward long passphrases; Argon2id does the rest."""
     if not pw:
         return 0, ""
     classes = sum(bool(re.search(p, pw)) for p in (r"[a-z]", r"[A-Z]", r"\d", r"[^\w\s]"))
@@ -69,179 +335,302 @@ def passphrase_strength(pw):
     return 4, "Strong"
 
 
+# ── Wizard state shared by the pages ──────────────────────────────────────────
+
+class State:
+    def __init__(self):
+        self.disk = None
+        self.passphrase = ""
+        self.full = ""
+        self.username = ""
+        self.password = ""
+        self.hostname = "bastille"
+        self.level = "high"
+        self.profiles = []            # extra profile names
+        self.fake_target = "decoy"
+        self.accounts = {"guerrilla", "pgp"}
+        self.apps = set()
+        self.pins = {}                # type -> digits
+
+
+LEVELS = [("standard", "Standard", "Basic hardening. Suitable for everyday use with privacy.", "bl", "shield"),
+          ("high", "High Security", "All protections active. Recommended for sensitive work.", "gn", "lock"),
+          ("anon", "Anonymity", "Adds Tor routing, MAC randomisation, metadata stripping.", "pu", "globe")]
+LEVEL_NAME = {k: n for k, n, *_ in LEVELS}
+
+ACCOUNT_GROUPS = [
+    ("Email & encryption", [
+        ("email", "Email", "Connect an existing inbox over IMAP and SMTP · used by the Mail app", "bl", "mail"),
+        ("guerrilla", "Guerrilla Mail address", "A disposable address for sign-ups, no personal details needed", "am", "spark"),
+        ("pgp", "PGP key", "Create a new key pair for signing and encrypting mail and messages", "gn", "key")]),
+    ("Messaging", [
+        ("signal", "Signal", "Link or register a number · used by the Messages app", "bl", "msg"),
+        ("session", "Session", "Create an identity with no phone number · used by the Messages app", "gn", "msg2")]),
+    ("Network", [
+        ("wireguard", "WireGuard VPN", "Import a .conf file from your provider", "pu", "vpn")]),
+]
+ACCOUNT_NAME = {k: n for _, items in ACCOUNT_GROUPS for k, n, *_ in items}
+
+APP_GROUPS = [
+    ("Privacy & communication", [
+        ("browser", "Browser", "Privacy browser combining Tor and Zen", "pu", "globe"),
+        ("mail", "Mail", "Encrypted mail with disposable Guerrilla Mail addresses and PGP", "bl", "mail"),
+        ("messages", "Messages", "Messaging hub for Signal, Session, and GPG", "bl", "msg"),
+        ("calendar", "Calendar", "Offline calendar that detects events from Mail and Messages", "am", "cal")]),
+    ("Files & office", [
+        ("files", "Files", "File manager showing age/GPG encryption badges", "gn", "folder"),
+        ("notes", "Notes", "Encrypted notes with PIN lock and Markdown preview", "gn", "notes"),
+        ("documents", "Documents", "Launcher for LibreOffice Writer with age decryption", "bl", "doc"),
+        ("sheets", "Sheets", "Launcher for LibreOffice Calc", "gn", "table"),
+        ("presentations", "Presentations", "Launcher for LibreOffice Impress", "am", "slides")]),
+    ("Tools & media", [
+        ("terminal", "Terminal", "Multi-tab terminal based on VTE", "gn", "term"),
+        ("maps", "Maps", "Offline maps viewer", "bl", "map"),
+        ("music", "Music", "Local music player built on GStreamer", "pu", "music"),
+        ("weather", "Weather", "Weather app using wttr.in with a privacy focus", "am", "cloud")]),
+]
+APP_ALL = [a for _, items in APP_GROUPS for a, *_ in items]
+APP_NAME = {a: n for _, items in APP_GROUPS for a, n, *_ in items}
+
+NAV = [("Start", [("Welcome", "shield")]),
+       ("Disk", [("Disk", "disk"), ("Encryption", "lock")]),
+       ("System", [("User", "user"), ("Profiles", "prof"), ("Online accounts", "acct"), ("Apps", "apps")]),
+       ("Security", [("Duress PINs", "pin")]),
+       ("Install", [("Review", "list"), ("Install", "down"), ("Done", "ok")])]
+
+STEPS = [("check", "Checking the disk"), ("partition", "Partitioning"),
+         ("format", "Creating the encrypted volume"), ("copy", "Copying system files"),
+         ("configure", "Configuring the system"), ("apps", "Installing selected apps"),
+         ("personalise", "Setting up profiles, accounts and PINs"),
+         ("initramfs", "Building the boot image"), ("bootloader", "Installing the bootloader"),
+         ("finish", "Finishing up")]
+WEIGHTS = {"check": 0.02, "partition": 0.04, "format": 0.07, "copy": 0.45, "configure": 0.06,
+           "apps": 0.10, "personalise": 0.03, "initramfs": 0.12, "bootloader": 0.08, "finish": 0.03}
+PIN_LABEL = {"duress": "Duress", "fake-duress": "fake duress", "dsm": "DSM"}
+
+
 # ── Pages ─────────────────────────────────────────────────────────────────────
 
-class Page(Gtk.Box):
-    """Base wizard page. Subclasses override validate()/on_show()."""
+class Page(Gtk.ScrolledWindow):
     title = ""
+    sub = ""
+    hint = ""
+    primary = "Continue"
 
-    def __init__(self, heading, blurb=None):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        self.set_margin_start(32); self.set_margin_end(32)
-        self.set_margin_top(20); self.set_margin_bottom(12)
-        h = Gtk.Label(label=heading, xalign=0)
-        h.add_css_class("title-2")
-        self.append(h)
-        if blurb:
-            b = Gtk.Label(label=blurb, xalign=0, wrap=True)
-            b.add_css_class("dim-label")
-            self.append(b)
-        self.on_change = lambda: None
+    def __init__(self, wiz):
+        super().__init__(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.wiz = wiz
+        self.st = wiz.state
+        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        self.box.set_margin_start(24)
+        self.box.set_margin_end(24)
+        self.box.set_margin_bottom(18)
+        head = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        head.add_css_class("panel-header")
+        self.title_lbl = label(self.title, "panel-title")
+        self.sub_lbl = label(self.sub, "panel-sub", wrap=True)
+        head.append(self.title_lbl)
+        head.append(self.sub_lbl)
+        self.box.append(head)
+        self.set_child(self.box)
+        self.build()
 
-    def validate(self):
-        return None
+    def add(self, w):
+        self.box.append(w)
+        return w
+
+    def build(self):
+        pass
 
     def on_show(self):
         pass
 
+    def validate(self):
+        return None
 
-def banner(text, css="bastille-warn", icon="dialog-warning-symbolic"):
-    box = Gtk.Box(spacing=10)
-    box.add_css_class(css)
-    box.append(Gtk.Image.new_from_icon_name(icon))
-    lbl = Gtk.Label(label=text, wrap=True, xalign=0, hexpand=True)
-    box.append(lbl)
-    box.label = lbl
-    return box
+    def changed(self):
+        self.wiz.refresh_nav()
 
 
 class WelcomePage(Page):
-    title = "Welcome"
+    title = "Install Bastille OS"
+    sub = "Encrypted install to an internal or external disk · about 5 minutes"
+    hint = "Nothing has been changed yet."
+    primary = "Get started"
 
-    def __init__(self):
-        super().__init__("Install Bastille OS")
-        sp = Adw.StatusPage()
-        sp.set_icon_name("security-high-symbolic")
-        sp.set_title("Install Bastille OS")
-        sp.set_description(
-            "This installs Bastille to an internal or external disk with the "
-            "root filesystem encrypted by LUKS2 (Argon2id).\n\n"
-            "The disk you pick will be erased. Everything you need to do next "
-            "takes about five minutes.")
-        sp.set_vexpand(True)
-        self.remove(self.get_first_child())
-        self.append(sp)
-        note = Gtk.Label(
-            label="Running Bastille from a USB stick without installing "
-                  "(like Tails) needs no installation. Close this window to keep "
-                  "using the live system.", wrap=True)
-        note.add_css_class("dim-label"); note.add_css_class("caption")
-        self.append(note)
+    def build(self):
+        rows = [("Full-disk encryption", "LUKS2 · AES-XTS 512-bit · Argon2id", "gn", "shield", "Included", "ok"),
+                ("Tor, DNSCrypt and WireGuard", "With a DNS lock and a network kill switch", "bl", "globe", "Included", "ok"),
+                ("RAM scrub on shutdown", "Memory is overwritten before power-off", "rd", "ram", "Included", "ok"),
+                ("USB inspector", "Flags forensic extraction tools · Bluetooth blocked by default", "am", "usb", "Included", "ok"),
+                ("Intel ME neutralizer", "Firmware tools and a boot-chain watchdog", "bl", "chip", "Included", "ok"),
+                ("Lock and duress PINs", "Set up on first boot · no systemd, no admin login", "gn", "lock", "First boot", "off")]
+        self.add(section("What’s built in", Card(*[
+            Row(t, d, tone, ic, [badge(bt, bk)]) for t, d, tone, ic, bt, bk in rows])))
+        trying = Row("Just trying it out?",
+                     "Close this window to keep using Bastille live from the USB stick. Nothing is installed.",
+                     "bl", "info", [icon("chev", "#898781", 14)])
+        trying.on_click(lambda: self.wiz.close())
+        self.add(section("Before you start", Card(
+            Row("The disk you choose will be erased", "Back up anything you want to keep first",
+                "am", "warn", [badge("Destructive", "warn")]), trying)))
 
 
 class DiskPage(Page):
-    title = "Disk"
+    title = "Choose a disk"
+    sub = "Bastille is installed to the whole disk. Everything on it will be erased."
 
-    def __init__(self):
-        super().__init__("Choose a disk",
-                         "Everything on the selected disk will be erased.")
-        self.selected = None
+    def build(self):
+        self.list_card = Card()
+        self.msg = label("", "row-desc", wrap=True)
+        self.add(section("Available disks", self.list_card, self.msg))
+        self.layout_title = label("", "section-title")
+        self.layout_card = Card()
+        lay = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        lay.append(self.layout_title)
+        lay.append(self.layout_card)
+        self.add(lay)
         self._group = None
-        self.group = Adw.PreferencesGroup()
-        self.append(self.group)
-        self.msg = Gtk.Label(xalign=0, wrap=True)
-        self.msg.add_css_class("dim-label")
-        self.append(self.msg)
-        refresh = Gtk.Button(label="Rescan disks")
-        refresh.set_halign(Gtk.Align.START)
-        refresh.connect("clicked", lambda *_: self.on_show())
-        self.append(refresh)
         self._rows = []
 
-    def on_show(self):
-        for r in self._rows:
-            self.group.remove(r)
-        self._rows, self._group, self.selected = [], None, None
+    def rescan(self):
+        self.list_card.clear()
+        self._group, self._rows = None, []
+        self.st.disk = None
         try:
             disks = list_disks()
         except Exception as e:  # noqa: BLE001
             self.msg.set_text(f"Could not list disks: {e}")
-            self.on_change()
-            return
-        if not disks:
-            self.msg.set_text("No disks found. Attach a disk and press Rescan.")
+            disks = []
         else:
-            self.msg.set_text("")
+            self.msg.set_text("" if disks else "No disks found. Attach a disk and press Rescan disks.")
         for d in disks:
-            row = Adw.ActionRow()
-            row.set_title(d["model"])
-            kind = ("USB" if d["transport"] == "usb" else
-                    "NVMe" if d["transport"] == "nvme" else
-                    "SATA" if d["transport"] in ("sata", "ata") else
-                    (d["transport"].upper() or "Disk"))
-            sub = f"{d['path']}  ·  {human_size(d['size'])}  ·  {kind}"
-            if d["removable"]:
-                sub += "  ·  removable"
-            row.set_subtitle(sub)
-            row.add_prefix(Gtk.Image.new_from_icon_name(
-                "drive-removable-media-symbolic" if d["removable"] else "drive-harddisk-symbolic"))
-            radio = Gtk.CheckButton()
-            if self._group is None:
-                self._group = radio
-            else:
-                radio.set_group(self._group)
-            radio.set_valign(Gtk.Align.CENTER)
-            if d["live_medium"]:
-                row.set_subtitle(sub + "  ·  Bastille is running from this disk")
-                row.set_sensitive(False)
-            elif d["too_small"]:
-                row.set_subtitle(sub + "  ·  smaller than 8 GB")
-                row.set_sensitive(False)
-            else:
-                radio.connect("toggled", self._toggled, d)
-                row.set_activatable_widget(radio)
-            row.add_suffix(radio)
-            self.group.add(row)
-            self._rows.append(row)
-        self.on_change()
+            self.list_card.append(self._disk_row(d))
+        self._update_layout()
+        self.changed()
 
-    def _toggled(self, btn, disk):
-        if btn.get_active():
-            self.selected = disk
-            self.on_change()
+    def _disk_row(self, d):
+        kind = {"usb": "USB", "nvme": "NVMe", "sata": "SATA", "ata": "SATA"}.get(
+            d["transport"], d["transport"].upper() or "Disk")
+        desc = f"{d['path']} · {human_size(d['size'])} · {kind}" + (" · removable" if d["removable"] else "")
+        radio = Gtk.CheckButton()
+        radio.add_css_class("radio")
+        radio.set_valign(Gtk.Align.CENTER)
+        if self._group is None:
+            self._group = radio
+        else:
+            radio.set_group(self._group)
+        badges = []
+        usable = True
+        if d["live_medium"]:
+            badges, usable = [badge("Bastille is running from this disk", "warn")], False
+        elif d["too_small"]:
+            badges, usable = [badge("Smaller than 8 GB", "warn")], False
+        row = Row(d["model"], desc, "bl" if not d["removable"] else "am",
+                  "ssd" if not d["removable"] else "stick",
+                  badges + ([radio] if usable else [radio]), mono_desc=True)
+        if not usable:
+            row.add_css_class("dim")
+            radio.set_sensitive(False)
+        else:
+            row.on_click(lambda r=radio: r.set_active(True))
+            radio.connect("toggled", lambda r, d=d, row=row: self._toggled(r, d, row))
+        self._rows.append(row)
+        return row
+
+    def _toggled(self, radio, d, row):
+        if radio.get_active():
+            self.st.disk = d
+            for r in self._rows:
+                r.remove_css_class("selected")
+            row.add_css_class("selected")
+            self._update_layout()
+            self.changed()
+
+    def _update_layout(self):
+        self.layout_card.clear()
+        d = self.st.disk
+        if not d:
+            self.layout_title.set_text("")
+            return
+        self.layout_title.set_text("HOW " + d["path"] + " WILL BE LAID OUT")
+        grid = Gtk.Grid(column_homogeneous=True, column_spacing=2, hexpand=True)
+        for text, col, span, css, ic in [("EFI", 0, 12, "part-efi", None), ("/boot", 12, 18, "part-boot", None),
+                                         ("Encrypted root · LUKS2", 30, 70, "part-root", "lock")]:
+            cell = Gtk.Box(spacing=6)
+            cell.add_css_class("part")
+            cell.add_css_class(css)
+            if ic:
+                cell.append(icon(ic, "#7ee08a", 12))
+            cell.append(label(text, "mono"))
+            grid.attach(cell, col, 0, span, 1)
+        holder = Gtk.Box()
+        holder.add_css_class("brow")
+        holder.append(grid)
+        self.layout_card.append(holder)
+        self.layout_card.append(Row("EFI system partition", "FAT32", None, None, [badge("512 MB", "off")]))
+        self.layout_card.append(Row("Boot", "Left unencrypted — GRUB can’t unlock Argon2id", None, None,
+                                    [badge("1 GB", "off")]))
+        self.layout_card.append(Row("Root", "LUKS2 container, ext4 inside", None, None,
+                                    [badge("Rest of disk", "ok")]))
+
+    def on_show(self):
+        self.rescan()
 
     def validate(self):
-        return None if self.selected else "Select a disk to continue."
+        return None if self.st.disk else "Select a disk to continue."
 
 
-class PassphrasePage(Page):
-    title = "Encryption"
+class EncryptionPage(Page):
+    title = "Disk encryption passphrase"
+    sub = "You’ll type this every time the computer starts. Nobody can recover it for you."
 
-    def __init__(self):
-        super().__init__(
-            "Disk encryption passphrase",
-            "You type this every time the computer starts. Nobody, including "
-            "the Bastille project, can recover it — if you forget it the data is gone.")
-        g = Adw.PreferencesGroup()
-        self.p1 = Adw.PasswordEntryRow(); self.p1.set_title("Passphrase")
-        self.p2 = Adw.PasswordEntryRow(); self.p2.set_title("Confirm passphrase")
-        g.add(self.p1); g.add(self.p2)
-        self.append(g)
-
-        self.bar = Gtk.LevelBar()
-        self.bar.set_min_value(0); self.bar.set_max_value(4)
-        self.bar.set_mode(Gtk.LevelBarMode.CONTINUOUS)
-        self.bar.add_offset_value("low", 1.5)
-        self.bar.add_offset_value("high", 3.5)
-        self.bar.add_offset_value("full", 4)
-        self.append(self.bar)
-        self.strength = Gtk.Label(xalign=0)
-        self.strength.add_css_class("caption")
-        self.append(self.strength)
-        tip = Gtk.Label(
-            label="Tip: four or five unrelated words are stronger and easier "
-                  "to remember than a short string of symbols.",
-            xalign=0, wrap=True)
-        tip.add_css_class("dim-label"); tip.add_css_class("caption")
-        self.append(tip)
-        self.p1.connect("changed", self._changed)
-        self.p2.connect("changed", self._changed)
+    def build(self):
+        self.p1, self.p2 = password_entry(), password_entry()
+        self.match = badge("", "off")
+        self.match.set_visible(False)
+        segs = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER)
+        segs.set_size_request(120, -1)
+        self.segs = []
+        for _ in range(4):
+            s = Gtk.Box(hexpand=True)
+            s.add_css_class("seg")
+            self.segs.append(s)
+            segs.append(s)
+        self.strength_badge = badge("—", "off")
+        self.add(section("Passphrase", Card(
+            Row("Passphrase", "At least 8 characters", "bl", "key", [self.p1]),
+            Row("Confirm passphrase", "Type it again", "bl", "key", [self.match, self.p2]),
+            Row("Strength", "Four or five unrelated words beat a short string of symbols",
+                "gn", "shield", [segs, self.strength_badge]))))
+        self.add(section("How your disk is protected", Card(
+            Row("LUKS2 container", "cryptsetup luksFormat --type=luks2", "gn", "lock",
+                [badge("Enabled", "ok")], mono_desc=True),
+            Row("Cipher", "aes-xts-plain64 · 512-bit key · sha512", "bl", "chip",
+                [badge("Strong", "ok")], mono_desc=True),
+            Row("Argon2id key derivation", "Memory-hard · up to 1 GiB · 4 threads · about 3 s to unlock",
+                "bl", "ram", [badge("Memory-hard", "ok")]))))
+        self.add(Card(Row("There is no recovery",
+                          "If you forget this passphrase, the data on the disk is gone for good.",
+                          "am", "warn"), css="warn"))
+        for e in (self.p1, self.p2):
+            e.connect("changed", self._changed)
 
     def _changed(self, *_):
-        score, label = passphrase_strength(self.p1.get_text())
-        self.bar.set_value(score)
-        self.strength.set_text(label)
-        self.on_change()
+        a, b = self.p1.get_text(), self.p2.get_text()
+        score, text = passphrase_strength(a)
+        for i, s in enumerate(self.segs):
+            for k in range(1, 5):
+                s.remove_css_class(f"on-{k}")
+            if i < score:
+                s.add_css_class(f"on-{score}")
+        set_badge(self.strength_badge, text or "—",
+                  "ok" if score >= 3 else "warn" if score == 2 else "crit" if score == 1 else "off")
+        self.match.set_visible(bool(b))
+        if b:
+            set_badge(self.match, "Match" if a == b else "No match", "ok" if a == b else "crit")
+        self.st.passphrase = a
+        self.changed()
 
     def validate(self):
         a, b = self.p1.get_text(), self.p2.get_text()
@@ -251,57 +640,62 @@ class PassphrasePage(Page):
             return "The two passphrases do not match."
         return None
 
-    @property
-    def value(self):
-        return self.p1.get_text()
 
+class UserPage(Page):
+    title = "Your account"
+    sub = "This account signs in to the desktop. By design it has no administrator rights."
 
-class AccountPage(Page):
-    title = "Account"
-
-    def __init__(self):
-        super().__init__("Your account",
-                         "This account logs in to the desktop. It has no administrator rights by design.")
-        g = Adw.PreferencesGroup()
-        self.full = Adw.EntryRow(); self.full.set_title("Name")
-        self.user = Adw.EntryRow(); self.user.set_title("Username")
-        self.pw1 = Adw.PasswordEntryRow(); self.pw1.set_title("Password")
-        self.pw2 = Adw.PasswordEntryRow(); self.pw2.set_title("Confirm password")
-        for r in (self.full, self.user, self.pw1, self.pw2):
-            g.add(r)
-        self.append(g)
-
-        g2 = Adw.PreferencesGroup()
-        self.host = Adw.EntryRow(); self.host.set_title("Computer name")
-        self.host.set_text("bastille")
-        g2.add(self.host)
-        self.append(g2)
-        n = Gtk.Label(
-            label="Bastille picks a random computer name at every start so the "
-                  "machine cannot be tracked on a network by its name.",
-            xalign=0, wrap=True)
-        n.add_css_class("dim-label"); n.add_css_class("caption")
-        self.append(n)
-
-        self._user_touched = False
-        self.user.connect("changed", lambda *_: self._user_edit())
+    def build(self):
+        self.full = text_entry()
+        self.user = text_entry()
+        self.pw1, self.pw2 = password_entry(), password_entry()
+        self.host = text_entry("bastille")
+        self.match = badge("", "off")
+        self.match.set_visible(False)
+        self.add(section("User", Card(
+            Row("Name", "Shown on the sign-in screen", None, None, [self.full]),
+            Row("Username", "Lowercase letters, digits, - and _ · not root, user or greeter", None, None, [self.user]),
+            Row("Password", "Used to sign in to the desktop", None, None, [self.pw1]),
+            Row("Confirm password", None, None, None, [self.match, self.pw2]))))
+        self.add(section("Computer", Card(
+            Row("Computer name", "Bastille picks a random name at every start so the machine can’t be tracked by it",
+                None, None, [self.host]))))
+        self.add(section("What this account can do", Card(
+            Row("Graphics, audio, input, network, removable media", "video · audio · input · netdev · plugdev",
+                "gn", "check", [badge("Allowed", "ok")]),
+            Row("Administrator (sudo)", "No admin group, no elevation", "rd", "lock", [badge("None", "off")]),
+            Row("Root login", "Account locked on the installed system", "gn", "lock", [badge("Locked", "ok")]),
+            Row("Remote login (SSH)", "Live-session SSH is removed after install", "gn", "shield",
+                [badge("Removed", "ok")]))))
+        self._auto = False
+        self._touched = False
         self.full.connect("changed", self._full_changed)
-        for r in (self.pw1, self.pw2, self.host):
-            r.connect("changed", lambda *_: self.on_change())
-
-    def _user_edit(self):
-        if getattr(self, "_auto", False):
-            return
-        self._user_touched = True
-        self.on_change()
+        self.user.connect("changed", self._user_changed)
+        for e in (self.pw1, self.pw2, self.host):
+            e.connect("changed", self._any)
 
     def _full_changed(self, *_):
-        if not self._user_touched:
-            guess = re.sub(r"[^a-z0-9_-]", "", self.full.get_text().split(" ")[0].lower())
+        if not self._touched:
+            guess = re.sub(r"[^a-z0-9_-]", "", (self.full.get_text().split(" ") or [""])[0].lower())
             self._auto = True
             self.user.set_text(guess)
             self._auto = False
-        self.on_change()
+        self._any()
+
+    def _user_changed(self, *_):
+        if not self._auto:
+            self._touched = True
+        self._any()
+
+    def _any(self, *_):
+        a, b = self.pw1.get_text(), self.pw2.get_text()
+        self.match.set_visible(bool(b))
+        if b:
+            set_badge(self.match, "Match" if a == b else "No match", "ok" if a == b else "crit")
+        s = self.st
+        s.full, s.username, s.password = self.full.get_text(), self.user.get_text(), a
+        s.hostname = self.host.get_text() or "bastille"
+        self.changed()
 
     def validate(self):
         u = self.user.get_text()
@@ -318,138 +712,439 @@ class AccountPage(Page):
         return None
 
 
-class SummaryPage(Page):
-    title = "Review"
+class ProfilesPage(Page):
+    title = "Profiles"
+    sub = "Choose how locked down Bastille runs, and which profiles live on this computer."
 
-    def __init__(self, wizard):
-        super().__init__("Ready to install",
-                         "Review the plan. The next button starts the installation and cannot be undone.")
-        self.w = wizard
-        self.group = Adw.PreferencesGroup()
-        self.append(self.group)
-        self._rows = []
-        self.warn = banner("")
-        self.append(self.warn)
-        confirm = Adw.ActionRow()
-        confirm.set_title("I understand that this disk will be erased")
-        self.switch = Gtk.Switch(valign=Gtk.Align.CENTER)
-        self.switch.connect("notify::active", lambda *_: self.on_change())
-        confirm.add_suffix(self.switch)
-        confirm.set_activatable_widget(self.switch)
-        g = Adw.PreferencesGroup(); g.add(confirm)
-        self.append(g)
+    def build(self):
+        self.level_card = Card()
+        self.add(section("Security level", self.level_card))
+        self._radios = {}
+        group = None
+        for key, name, desc, tone, ic in LEVELS:
+            radio = Gtk.CheckButton()
+            radio.add_css_class("radio")
+            radio.set_valign(Gtk.Align.CENTER)
+            if group is None:
+                group = radio
+            else:
+                radio.set_group(group)
+            suffix = ([badge("Recommended", "ok")] if key == "high" else []) + [radio]
+            row = Row(name, desc, tone, ic, suffix)
+            row.on_click(lambda r=radio: r.set_active(True))
+            radio.connect("toggled", lambda r, k=key: self._pick(k) if r.get_active() else None)
+            self._radios[key] = (radio, row)
+            self.level_card.append(row)
+        self.level_badge = badge(LEVEL_NAME[self.st.level], "run")
+        self.main_row = Row("Main", "", None, "user", [self.level_badge])
+        self.decoy_row = Row("Decoy", "Shown instead of Main when the fake duress PIN is entered. "
+                             "Looks like a normal, clean desktop.", "am", "prof",
+                             [badge("Fake duress target", "warn")])
+        self.extra_card = Card(self.main_row, self.decoy_row)
+        add_btn = button("Add", small=True)
+        add_btn.connect("clicked", lambda *_: self._add_dialog())
+        self.add_row = Row("Add a profile", "For example work, travel or research", None, "plus", [add_btn])
+        self.extra_card.append(self.add_row)
+        self.add(section("Profiles on this computer", self.extra_card))
+        self._extra_rows = []
+        self._pick(self.st.level)
+
+    def _pick(self, key):
+        self.st.level = key
+        for k, (radio, row) in self._radios.items():
+            if radio.get_active() != (k == key):
+                radio.set_active(k == key)
+            (row.add_css_class if k == key else row.remove_css_class)("selected")
+        set_badge(self.level_badge, LEVEL_NAME[key], "run")
+        self.wiz.hint_override = f"Security level: {LEVEL_NAME[key]} · you can change this later in Settings"
+        self.changed()
 
     def on_show(self):
-        for r in self._rows:
-            self.group.remove(r)
-        self._rows = []
-        d = self.w.disk_page.selected
-        a = self.w.account_page
-        for t, s in [
-            ("Install to", f"{d['model']}  ({d['path']}, {human_size(d['size'])})"),
-            ("Partitions", "512 MB EFI  ·  1 GB /boot  ·  rest encrypted LUKS2 root"),
-            ("Account", f"{a.full.get_text() or a.user.get_text()}  ({a.user.get_text()})"),
-            ("Computer name", a.host.get_text() or "bastille"),
-        ]:
-            r = Adw.ActionRow(); r.set_title(t); r.set_subtitle(s)
-            self.group.add(r); self._rows.append(r)
-        self.warn.label.set_text(
-            f"All data on {d['path']} will be permanently destroyed.")
+        s = self.st
+        self.main_row.set_desc(f"{s.full or s.username} · {s.username} · your everyday desktop")
+        self._pick(s.level)
+
+    def _add_dialog(self):
+        dlg = Adw.MessageDialog.new(self.wiz, "Add a profile")
+        dlg.set_body("Letters, digits, - and _ only.")
+        entry = Gtk.Entry(placeholder_text="work")
+        dlg.set_extra_child(entry)
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("add", "Add")
+        dlg.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+        dlg.set_default_response("add")
+        entry.connect("activate", lambda *_: dlg.response("add"))
+
+        def done(d, resp):
+            name = entry.get_text().strip()
+            if resp == "add" and re.match(r"^[a-zA-Z0-9_-]{1,32}$", name) \
+                    and name.lower() not in ("main", "decoy") and name not in self.st.profiles:
+                self.st.profiles.append(name)
+                self._refresh_extra()
+        dlg.connect("response", done)
+        dlg.present()
+
+    def _refresh_extra(self):
+        for r in self._extra_rows:
+            self.extra_card.remove(r)
+        self._extra_rows = []
+        self.extra_card.remove(self.add_row)
+        for name in self.st.profiles:
+            rm = button("Remove", small=True)
+            row = Row(name, "Its own encrypted home, keyring and browser profile", None, "prof", [rm])
+            rm.connect("clicked", lambda _b, n=name: (self.st.profiles.remove(n), self._refresh_extra()))
+            self.extra_card.append(row)
+            self._extra_rows.append(row)
+        self.extra_card.append(self.add_row)
+
+
+class AccountsPage(Page):
+    title = "Online accounts"
+
+    def build(self):
+        self._btns = {}
+        for title, items in ACCOUNT_GROUPS:
+            rows = []
+            for key, name, desc, tone, ic in items:
+                btn = button("Add", small=True)
+                btn.connect("clicked", lambda _b, k=key: self._toggle(k))
+                self._btns[key] = btn
+                rows.append(Row(name, desc, tone, ic, [btn]))
+            self.add(section(title, Card(*rows)))
+        self.add(Card(Row("Sign-in details are asked for after the first restart",
+                          "Nothing is sent anywhere during install. Accounts that need a password or login "
+                          "code finish setting up inside their app.", "bl", "info")))
+        self._sync()
+
+    def _toggle(self, key):
+        self.st.accounts.symmetric_difference_update({key})
+        self._sync()
+
+    def _sync(self):
+        for k, b in self._btns.items():
+            on = k in self.st.accounts
+            b.set_label("✓ Added" if on else "Add")
+            (b.add_css_class if on else b.remove_css_class)("btn-ok")
+        n = len(self.st.accounts)
+        self.sub_lbl.set_text("Optional. Add the accounts you’ll use now, or skip and add them later. "
+                              "Details are saved on the encrypted disk.")
+        self.wiz.hint_override = f"{n} of {len(self._btns)} selected · skip this and add accounts later in Settings"
+        self.changed()
+
+    def on_show(self):
+        self._sync()
+
+
+class AppsPage(Page):
+    title = "Choose your apps"
+
+    def build(self):
+        clear = button("Clear", small=True)
+        sel = button("Select all", small=True)
+        clear.connect("clicked", lambda *_: (self.st.apps.clear(), self._sync()))
+        sel.connect("clicked", lambda *_: (self.st.apps.update(APP_ALL), self._sync()))
+        self.add(section("Source", Card(Row(
+            "github.com/bastille-linux/apps",
+            "GTK4 native apps for Bastille OS · each installs to /usr/local/bin/bastille-<name>",
+            "bl", "apps", [clear, sel], mono_desc=True))))
+        self.add(section("Always installed", Card(Row(
+            "Settings", "Panel for configuring system hardening", "gn", "chip", [badge("Included", "ok")]))))
+        self._btns = {}
+        for title, items in APP_GROUPS:
+            rows = []
+            for key, name, desc, tone, ic in items:
+                btn = button("Install", small=True)
+                btn.connect("clicked", lambda _b, k=key: (self.st.apps.symmetric_difference_update({k}), self._sync()))
+                self._btns[key] = btn
+                rows.append(Row(name, desc, tone, ic, [btn]))
+            self.add(section(title, Card(*rows)))
+        self._sync()
+
+    def _sync(self):
+        for k, b in self._btns.items():
+            on = k in self.st.apps
+            b.set_label("✓ Installed" if on else "Install")
+            (b.add_css_class if on else b.remove_css_class)("btn-ok")
+        n = len(self.st.apps)
+        self.sub_lbl.set_text("Only Settings will be installed. Pick any of the 13 optional apps below."
+                              if n == 0 else
+                              f"{n} optional app{'s' if n != 1 else ''} will be installed with Settings.")
+        self.wiz.hint_override = f"{n} of 13 optional apps selected · change later in Settings → Installed Apps"
+        self.changed()
+
+    def on_show(self):
+        self._sync()
+
+
+class DuressPage(Page):
+    title = "Duress PINs"
+    sub = ("Optional. Special PINs you can enter at the login or lock screen when someone "
+           "is forcing you to unlock.")
+    hint = "Skip this and set PINs later in Settings → Security PINs"
+
+    def build(self):
+        self.add(Card(Row("They look like a normal unlock",
+                          "The screen doesn’t freeze or show a warning. Whoever is watching sees a login succeed.",
+                          "bl", "info")))
+        self.entries, self.badges = {}, {}
+        rows = []
+        for key, name, desc, tone, ic in [
+                ("duress", "Duress PIN", "Wipes keys from RAM, shuts down the VPN and powers off straight away", "rd", "lock"),
+                ("fake-duress", "Fake duress PIN",
+                 "Looks like a wipe: the screen goes black, then a clean-looking decoy desktop appears", "am", "prof"),
+                ("dsm", "DSM check-in PIN", "Check-in code for dead-switch mode", "pu", "pin")]:
+            e = password_entry(200)
+            b = badge("Not set", "off")
+            e.connect("changed", lambda *_: self._changed())
+            self.entries[key], self.badges[key] = e, b
+            rows.append(Row(name, desc, tone, ic, [b, e]))
+        self.add(section("PINs", Card(*rows)))
+        self.target = Gtk.DropDown.new_from_strings(["Decoy", "Main"])
+        self.target.add_css_class("inp")
+        self.target.set_valign(Gtk.Align.CENTER)
+        self.target.connect("notify::selected", lambda *_: self._changed())
+        self.add(section("Fake duress", Card(Row("Switch to this profile", "Created on the Profiles step",
+                                                 None, None, [self.target]))))
+        self.len_badge, self.diff_badge = badge("", "off"), badge("", "off")
+        self.add(section("Checks", Card(Row("At least 4 digits", None, None, None, [self.len_badge]),
+                                        Row("Different from each other and from your login password", None, None,
+                                            None, [self.diff_badge]))))
+        self.add(section("Dead-switch mode (DSM)", Card(Row(
+            "Permanent, cannot be undone",
+            "DSM overwrites the UEFI firmware and crypto-erases the NVMe. Restoring the BIOS needs a hardware "
+            "SPI programmer. Leave this off unless you know you need it.", "rd", "warn",
+            [badge("Destructive", "crit")]), css="crit")))
+
+    def on_show(self):
+        self.target.set_model(Gtk.StringList.new(["Decoy"] + list(self.st.profiles) + ["Main"]))
+        self._changed()
+
+    def pins(self):
+        return {k: e.get_text() for k, e in self.entries.items() if e.get_text()}
+
+    def _problems(self):
+        pins = self.pins()
+        short = [k for k, p in pins.items() if not (p.isdigit() and len(p) >= 4)]
+        vals = list(pins.values()) + ([self.st.password] if pins and self.st.password else [])
+        return short, len(set(vals)) != len(vals)
+
+    def _changed(self):
+        pins = self.pins()
+        for k, b in self.badges.items():
+            set_badge(b, "Set" if k in pins else "Not set", "ok" if k in pins else "off")
+        short, dup = self._problems()
+        set_badge(self.len_badge, "OK" if not short else "Digits only, 4 or more", "ok" if not short else "crit")
+        set_badge(self.diff_badge, "OK" if not dup else "Must all be different", "ok" if not dup else "crit")
+        self.st.pins = pins
+        item = self.target.get_selected_item()
+        self.st.fake_target = item.get_string().lower() if item else "decoy"
+        self.changed()
+
+    def validate(self):
+        short, dup = self._problems()
+        if short:
+            return "PINs must be 4 or more digits."
+        if dup:
+            return "Each PIN must be different from the others and from your login password."
+        return None
+
+    def skip(self):
+        for e in self.entries.values():
+            e.set_text("")
+
+
+class ReviewPage(Page):
+    title = "Ready to install"
+    sub = "Check the plan. Pressing Install starts straight away and can’t be undone."
+    primary = "Install"
+
+    def build(self):
+        self.plan = Card()
+        self.add(section("Install plan", self.plan))
+        self.switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.switch.connect("notify::active", lambda *_: self.changed())
+        self.warn_row = Row("", "This can’t be undone.", "rd", "warn", [badge("Destructive", "crit")])
+        self.confirm = Row("I understand that this disk will be erased", "Required to enable the Install button",
+                           None, None, [self.switch])
+        self.confirm.on_click(lambda: self.switch.set_active(not self.switch.get_active()))
+        self.add(Card(self.warn_row, self.confirm))
+
+    def on_show(self):
+        s = self.st
+        d = s.disk
+        self.plan.clear()
+        na, np_ = len(s.accounts), len(s.apps)
+        pins = [PIN_LABEL[k] for k in ("duress", "fake-duress") if k in s.pins]
+        rows = [
+            ("Install to", f"{d['model']} · {d['path']} · {human_size(d['size'])}", []),
+            ("Partitions", "512 MB EFI · 1 GB /boot · rest LUKS2 root", []),
+            ("Encryption", "LUKS2 · aes-xts-plain64 · 512-bit · argon2id", [badge("Passphrase set", "ok")]),
+            ("Account", f"{s.full or s.username} · {s.username} · no admin rights", []),
+            ("Computer name", f"{s.hostname} · randomised at each start", []),
+            ("Profiles", f"Main ({LEVEL_NAME[s.level]}) and Decoy" + "".join(f" and {p}" for p in s.profiles),
+             [badge(f"{2 + len(s.profiles)} profiles", "ok")]),
+            ("Online accounts",
+             (" and ".join(ACCOUNT_NAME[a] for a in sorted(s.accounts)) + " · sign-in finishes after first restart")
+             if na else "None · add them later in Settings",
+             [badge(f"{na} account{'s' if na != 1 else ''}", "ok" if na else "off")]),
+            ("Duress PINs", (" and ".join(pins) + " set" if pins else "None set")
+             + (" · DSM on" if "dsm" in s.pins else " · DSM off"),
+             [badge(f"{len(s.pins)} PIN{'s' if len(s.pins) != 1 else ''}", "warn" if s.pins else "off")]),
+            ("Apps", "Settings" + "".join(f", {APP_NAME[a]}" for a in APP_ALL if a in s.apps)
+             + (" from bastille-linux/apps" if np_ else ""),
+             [badge(f"{np_ + 1} app{'s' if np_ else ''}", "ok")]),
+        ]
+        for t, desc, suffix in rows:
+            self.plan.append(Row(t, desc, None, None, suffix))
+        self.warn_row.title.set_text(f"All data on {d['path']} will be permanently destroyed")
         self.switch.set_active(False)
 
     def validate(self):
         return None if self.switch.get_active() else "Confirm that the disk may be erased."
 
 
-STEP_IDS = [("check", "Checking the disk"), ("partition", "Partitioning"),
-            ("format", "Creating the encrypted volume"),
-            ("copy", "Copying system files"),
-            ("configure", "Configuring the system"),
-            ("initramfs", "Building the boot image"),
-            ("bootloader", "Installing the bootloader"),
-            ("finish", "Finishing up")]
+class InstallingPage(Page):
+    title = "Installing Bastille OS"
+    sub = "This takes a few minutes. Don’t turn the computer off."
 
-
-class ProgressPage(Page):
-    title = "Installing"
-
-    def __init__(self):
-        super().__init__("Installing Bastille OS",
-                         "This takes a few minutes. Do not turn the computer off.")
-        self.rows = {}
-        g = Adw.PreferencesGroup()
-        for sid, label in STEP_IDS:
-            row = Adw.ActionRow(); row.set_title(label)
-            img = Gtk.Image.new_from_icon_name("content-loading-symbolic")
-            img.add_css_class("bastille-step-wait")
-            row.add_prefix(img)
-            g.add(row)
-            self.rows[sid] = (row, img)
-        self.append(g)
-        self.bar = Gtk.ProgressBar(); self.append(self.bar)
-        ex = Gtk.Expander(label="Details")
-        self.tv = Gtk.TextView(editable=False, monospace=True, cursor_visible=False)
-        self.tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        sw = Gtk.ScrolledWindow(min_content_height=140)
-        sw.set_child(self.tv)
-        ex.set_child(sw)
-        self.append(ex)
-        self.sw = sw
-        self.error = banner("", "bastille-error", "dialog-error-symbolic")
+    def build(self):
+        self.what = label("Starting…", "row-label")
+        self.overall = label("0% overall", ("mono", "row-desc"))
+        self.bar = Gtk.ProgressBar()
+        self.bar.add_css_class("bar")
+        top = Gtk.Box()
+        top.append(self.what)
+        top.append(Gtk.Box(hexpand=True))
+        top.append(self.overall)
+        holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        holder.add_css_class("brow")
+        holder.append(top)
+        holder.append(self.bar)
+        self.add(section("Progress", Card(holder)))
+        self.step_rows = {}
+        rows = []
+        for sid, name in STEPS:
+            b = badge("Waiting", "off")
+            row = Row(name, None, "", "dot", [b], muted=True)
+            self.step_rows[sid] = (row, b)
+            rows.append(row)
+        self.add(section("Steps", Card(*rows)))
+        self.log_view = Gtk.TextView(editable=False, monospace=True, cursor_visible=False,
+                                     wrap_mode=Gtk.WrapMode.WORD_CHAR, left_margin=14, right_margin=14,
+                                     top_margin=10, bottom_margin=10)
+        self.log_view.add_css_class("row-desc")
+        sw = Gtk.ScrolledWindow(min_content_height=110, max_content_height=160, propagate_natural_height=True)
+        sw.set_child(self.log_view)
+        self.log_sw = sw
+        self.add(section("Details", Card(sw, css="log")))
+        self.error = Card(Row("The installation failed", "", "rd", "warn", [badge("Error", "crit")]), css="crit")
         self.error.set_visible(False)
-        self.append(self.error)
+        self.add(self.error)
         self._current = None
 
+    def reset(self):
+        self._current = None
+        self.error.set_visible(False)
+        self.bar.set_fraction(0)
+        self.overall.set_text("0% overall")
+        self.log_view.get_buffer().set_text("")
+        for row, b in self.step_rows.values():
+            self._style(row, b, "wait")
+
     def log(self, msg):
-        buf = self.tv.get_buffer()
+        buf = self.log_view.get_buffer()
         buf.insert(buf.get_end_iter(), msg + "\n")
-        adj = self.sw.get_vadjustment()
-        adj.set_value(adj.get_upper())
+        adj = self.log_sw.get_vadjustment()
+        GLib.idle_add(lambda: adj.set_value(adj.get_upper()))
+
+    def _style(self, row, b, state):
+        row.remove_css_class("selected")
+        row.title.remove_css_class("muted")
+        new = chip({"done": "gn", "run": "bl"}.get(state, ""),
+                   {"done": "check", "run": "spin"}.get(state, "dot"))
+        row.remove(row.chip)
+        row.prepend(new)
+        row.chip = new
+        if state == "done":
+            set_badge(b, "Done", "ok")
+        elif state == "run":
+            set_badge(b, "Running", "run")
+            row.add_css_class("selected")
+        else:
+            set_badge(b, "Waiting", "off")
+            row.title.add_css_class("muted")
 
     def set_step(self, sid, progress):
+        order = [s for s, _ in STEPS]
+        if sid in self.step_rows and sid != self._current:
+            for s in order[:order.index(sid)]:
+                self._style(*self.step_rows[s], "done")
+            self._style(*self.step_rows[sid], "run")
+            self._current = sid
+            self.what.set_text(dict(STEPS)[sid])
+            self.wiz.hint_override = f"Step {order.index(sid) + 1} of {len(order)}"
+            self.wiz.refresh_nav()
         self.bar.set_fraction(progress)
-        if sid == self._current or sid not in self.rows:
-            return
-        order = [s for s, _ in STEP_IDS]
-        for s in order[:order.index(sid)]:
-            _, img = self.rows[s]
-            img.set_from_icon_name("emblem-ok-symbolic")
-            img.remove_css_class("bastille-step-wait"); img.add_css_class("bastille-step-done")
-        _, img = self.rows[sid]
-        img.set_from_icon_name("media-playback-start-symbolic")
-        img.remove_css_class("bastille-step-wait")
-        self._current = sid
+        self.overall.set_text(f"{int(progress * 100)}% overall")
+        if sid in order:
+            base = sum(WEIGHTS[k] for k in order[:order.index(sid)])
+            pct = int(max(0.0, min(1.0, (progress - base) / WEIGHTS[sid])) * 100)
+            row, b = self.step_rows[sid]
+            if sid == "copy":
+                set_badge(b, f"{pct}%", "run")
+                self.what.set_text(f"{dict(STEPS)[sid]} · {pct}%")
 
     def finish_ok(self):
-        for _, img in self.rows.values():
-            img.set_from_icon_name("emblem-ok-symbolic")
-            img.remove_css_class("bastille-step-wait"); img.add_css_class("bastille-step-done")
+        for row, b in self.step_rows.values():
+            self._style(row, b, "done")
         self.bar.set_fraction(1.0)
+        self.overall.set_text("100% overall")
 
-    def finish_error(self, msg):
-        self.error.label.set_text(msg)
+    def fail(self, msg):
+        self.error.get_first_child().desc.set_text(msg)
         self.error.set_visible(True)
 
 
 class DonePage(Page):
-    title = "Done"
+    title = "Installation complete"
+    sub = "Remove the USB stick, then restart."
+    primary = "Restart now"
 
-    def __init__(self, wizard):
-        super().__init__("")
-        self.remove(self.get_first_child())
-        sp = Adw.StatusPage()
-        sp.set_icon_name("emblem-ok-symbolic")
-        sp.set_title("Installation complete")
-        sp.set_description("Remove the USB stick, then restart.\n"
-                           "You will be asked for the disk passphrase at every start.")
-        btn = Gtk.Button(label="Restart now")
-        btn.add_css_class("pill"); btn.add_css_class("suggested-action")
-        btn.set_halign(Gtk.Align.CENTER)
-        btn.connect("clicked", lambda *_: subprocess.Popen(["pkexec", "/sbin/reboot"])
-                    if os.geteuid() else subprocess.Popen(["/sbin/reboot"]))
-        sp.set_child(btn)
-        sp.set_vexpand(True)
-        self.append(sp)
+    def build(self):
+        self.add(Card(Row("Bastille OS is installed",
+                          "You’ll be asked for the disk passphrase every time the computer starts.",
+                          "gn", "ok", [badge("Success", "ok")])))
+        self.next_card = Card()
+        self.add(section("What happens next", self.next_card))
+        self.setup_card = Card()
+        self.add(section("Set up for you", self.setup_card))
+
+    def on_show(self):
+        s = self.st
+        self.next_card.clear()
+        for t, d in [("1 · Unlock the disk", "Enter your passphrase at boot, before anything else loads"),
+                     (f"2 · Sign in as {s.username}", "With the account password you just chose"),
+                     ("3 · First-boot setup", "Finish signing in to your online accounts, and set anything "
+                      "you skipped · about 2 minutes")]:
+            self.next_card.append(Row(t, d))
+        self.setup_card.clear()
+        n_apps = len(s.apps) + 1
+        self.setup_card.append(Row(f"{n_apps} app{'s' if n_apps != 1 else ''}",
+                                   "Settings" + "".join(f", {APP_NAME[a]}" for a in APP_ALL if a in s.apps)
+                                   + " · add more any time in Settings → Installed Apps",
+                                   "gn", "apps", [badge("Installed", "ok")]))
+        self.setup_card.append(Row(f"{2 + len(s.profiles)} profiles",
+                                   f"Main ({LEVEL_NAME[s.level]}) and Decoy"
+                                   + "".join(f" and {p}" for p in s.profiles), "bl", "prof",
+                                   [badge("Ready", "ok")]))
+        if s.accounts:
+            self.setup_card.append(Row(f"{len(s.accounts)} online account{'s' if len(s.accounts) != 1 else ''}",
+                                       " and ".join(ACCOUNT_NAME[a] for a in sorted(s.accounts)),
+                                       "am", "acct", [badge("Added", "ok")]))
+        if s.pins:
+            self.setup_card.append(Row("Duress PINs", " and ".join(PIN_LABEL[k] for k in s.pins if k != "dsm")
+                                       + (" · DSM on" if "dsm" in s.pins else " · DSM off"),
+                                       "rd", "pin", [badge("Set", "ok")]))
 
 
 # ── Window ────────────────────────────────────────────────────────────────────
@@ -457,157 +1152,190 @@ class DonePage(Page):
 class InstallWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
+        self.add_css_class("bastille")
         self.set_title("Install Bastille OS")
-        self.set_default_size(640, 700)
+        self.set_default_size(1024, 680)
+        self.state = State()
+        self.hint_override = None
+        self.ready = False
 
-        self.disk_page = DiskPage()
-        self.pass_page = PassphrasePage()
-        self.account_page = AccountPage()
-        self.summary_page = SummaryPage(self)
-        self.progress_page = ProgressPage()
-        self.done_page = DonePage(self)
-        self.pages = [WelcomePage(), self.disk_page, self.pass_page,
-                      self.account_page, self.summary_page,
-                      self.progress_page, self.done_page]
+        self.pages = [WelcomePage(self), DiskPage(self), EncryptionPage(self), UserPage(self),
+                      ProfilesPage(self), AccountsPage(self), AppsPage(self), DuressPage(self),
+                      ReviewPage(self), InstallingPage(self), DonePage(self)]
+        (self.welcome, self.disk_page, self.enc_page, self.user_page, self.profiles_page,
+         self.accounts_page, self.apps_page, self.duress_page, self.review_page,
+         self.install_page, self.done_page) = self.pages
+        self.idx = 0
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.header = Adw.HeaderBar()
-        root.append(self.header)
+        root.append(Adw.HeaderBar())
+        body = Gtk.Box(vexpand=True)
+        root.append(body)
 
-        self.stack = Gtk.Stack()
-        self.stack.set_vexpand(True)
-        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.nav = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.nav.add_css_class("nav")
+        self.nav.set_size_request(220, -1)
+        body.append(self.nav)
+
+        main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        self.stack = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.CROSSFADE,
+                               transition_duration=120)
         for i, p in enumerate(self.pages):
-            p.on_change = self._update_nav
-            sw = Gtk.ScrolledWindow(); sw.set_child(p)
-            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            self.stack.add_named(sw, str(i))
-        root.append(self.stack)
+            self.stack.add_named(p, str(i))
+        main.append(self.stack)
 
-        self.hint = Gtk.Label(xalign=0)
-        self.hint.add_css_class("caption"); self.hint.add_css_class("dim-label")
-        self.hint.set_margin_start(32)
-        root.append(self.hint)
-
-        bar = Gtk.Box(spacing=8)
-        bar.set_margin_start(24); bar.set_margin_end(24)
-        bar.set_margin_top(8); bar.set_margin_bottom(16)
-        self.back = Gtk.Button(label="Back")
+        footer = Gtk.Box(spacing=8)
+        footer.add_css_class("footer")
+        footer.set_size_request(-1, 56)
+        self.left_btn = button("Rescan disks")
+        self.left_btn.connect("clicked", lambda *_: self.disk_page.rescan())
+        self.hint = label("", "hint")
+        self.hint.set_hexpand(True)
+        self.skip_btn = button("Skip for now")
+        self.skip_btn.connect("clicked", self._skip)
+        self.back = button("Back")
         self.back.connect("clicked", self._go_back)
-        self.next = Gtk.Button(label="Continue")
-        self.next.add_css_class("pill"); self.next.add_css_class("suggested-action")
+        self.next = button("Continue", "pri")
         self.next.connect("clicked", self._go_next)
-        spacer = Gtk.Box(hexpand=True)
-        bar.append(self.back); bar.append(spacer); bar.append(self.next)
-        root.append(bar)
+        self.keep_btn = button("Keep using live system")
+        self.keep_btn.connect("clicked", lambda *_: self.close())
+        for w in (self.left_btn, self.hint, self.keep_btn, self.skip_btn, self.back, self.next):
+            footer.append(w)
+        main.append(footer)
+        body.append(main)
         self.set_content(root)
-
-        self.idx = 0
+        self.ready = True
         self._show(0)
 
     # navigation ---------------------------------------------------------
-    def _show(self, i, forward=True):
-        self.idx = i
-        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT if forward
-                                       else Gtk.StackTransitionType.SLIDE_RIGHT)
-        self.stack.set_visible_child_name(str(i))
-        self.pages[i].on_show()
-        self._update_nav()
+    def _build_nav(self):
+        while (c := self.nav.get_first_child()) is not None:
+            self.nav.remove(c)
+        i = 0
+        for group, items in NAV:
+            self.nav.append(label(group.upper(), "nav-label"))
+            for text, ic in items:
+                done, active = i < self.idx, i == self.idx
+                row = Gtk.Box(spacing=8)
+                row.add_css_class("nav-item")
+                if active:
+                    row.add_css_class("active")
+                color = "#3fb950" if done else "#2a78d6" if active else "#898781"
+                row.append(icon("check" if done else ic, color, 16))
+                row.append(label(text))
+                self.nav.append(row)
+                i += 1
 
-    def _update_nav(self):
-        i = self.idx
-        page = self.pages[i]
-        installing = page is self.progress_page
+    def _show(self, i):
+        self.idx = i
+        self.hint_override = None
+        self.stack.set_visible_child_name(str(i))
+        self._build_nav()
+        self.pages[i].on_show()
+        self.refresh_nav()
+
+    def refresh_nav(self):
+        if not self.ready:
+            return
+        page = self.pages[self.idx]
+        busy = page is self.install_page
         done = page is self.done_page
-        self.back.set_visible(0 < i < 5)
-        self.next.set_visible(not installing and not done)
-        err = page.validate() if not installing and not done else None
+        failed = busy and self.install_page.error.get_visible()
+        err = None if busy or done else page.validate()
+        self.left_btn.set_visible(page is self.disk_page)
+        self.skip_btn.set_visible(page is self.duress_page)
+        self.keep_btn.set_visible(done)
+        self.back.set_visible((not busy and not done and self.idx > 0) or failed)
+        self.back.set_label("Start over" if failed else "Back")
+        self.next.set_visible(not busy)
+        self.next.set_label(page.primary)
         self.next.set_sensitive(err is None)
-        self.hint.set_text(err or "")
-        last_review = page is self.summary_page
-        self.next.set_label("Install" if last_review else "Continue")
-        for c in ("suggested-action", "destructive-action"):
+        for c in ("btn-pri", "btn-dng"):
             self.next.remove_css_class(c)
-        self.next.add_css_class("destructive-action" if last_review else "suggested-action")
+        self.next.add_css_class("btn-dng" if page is self.review_page else "btn-pri")
+        self.hint.set_text(err or self.hint_override or page.hint)
 
     def _go_back(self, *_):
-        self._show(self.idx - 1, forward=False)
-
-    def _go_next(self, *_):
-        if self.pages[self.idx] is self.summary_page:
-            self._start_install()
+        if self.install_page.error.get_visible():
+            self.install_page.reset()
+            self._show(self.pages.index(self.review_page))
             return
+        self._show(self.idx - 1)
+
+    def _skip(self, *_):
+        self.duress_page.skip()
         self._show(self.idx + 1)
 
+    def _go_next(self, *_):
+        page = self.pages[self.idx]
+        if page is self.review_page:
+            self._start_install()
+        elif page is self.done_page:
+            subprocess.Popen(["/sbin/reboot"] if os.geteuid() == 0 else ["pkexec", "/sbin/reboot"])
+        else:
+            self._show(self.idx + 1)
+
     # install ------------------------------------------------------------
-    def _start_install(self):
-        self._show(5)
-        a = self.account_page
-        cfg = {
-            "disk": self.disk_page.selected["path"],
-            "confirm": self.disk_page.selected["path"],
-            "passphrase": self.pass_page.value,
-            "username": a.user.get_text(),
-            "fullname": a.full.get_text(),
-            "password": a.pw1.get_text(),
-            "hostname": a.host.get_text() or "bastille",
+    def _config(self):
+        s = self.state
+        return {
+            "disk": s.disk["path"], "confirm": s.disk["path"], "passphrase": s.passphrase,
+            "username": s.username, "fullname": s.full, "password": s.password,
+            "hostname": s.hostname, "level": s.level, "profiles": list(s.profiles),
+            "fake_duress_target": s.fake_target, "accounts": sorted(s.accounts),
+            "apps": [a for a in APP_ALL if a in s.apps], "pins": dict(s.pins),
         }
-        threading.Thread(target=self._run_backend, args=(cfg,), daemon=True).start()
+
+    def _start_install(self):
+        self.install_page.reset()
+        self._show(self.pages.index(self.install_page))
+        threading.Thread(target=self._run_backend, args=(self._config(),), daemon=True).start()
 
     def _run_backend(self, cfg):
+        ip = self.install_page
         cmd = [BACKEND, "--install"]
         if os.geteuid() != 0:
             cmd = ["pkexec"] + cmd
-        pp = self.progress_page
         try:
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True)
             proc.stdin.write(json.dumps(cfg) + "\n")
             proc.stdin.close()
         except Exception as e:  # noqa: BLE001
-            GLib.idle_add(pp.finish_error, f"Could not start the installer: {e}")
+            GLib.idle_add(self._failed, f"Could not start the installer: {e}")
             return
-        ok = False
-        failed = None
+        ok, failed = False, None
         for line in proc.stdout:
             line = line.rstrip("\n")
             try:
                 ev = json.loads(line)
             except ValueError:
-                GLib.idle_add(pp.log, line)
+                GLib.idle_add(ip.log, line)
                 continue
             kind = ev.get("event")
             if kind == "step":
-                GLib.idle_add(pp.set_step, ev["id"], ev.get("progress", 0))
+                GLib.idle_add(ip.set_step, ev["id"], ev.get("progress", 0))
             elif kind == "log":
-                GLib.idle_add(pp.log, ev["msg"])
+                GLib.idle_add(ip.log, ev["msg"])
             elif kind == "error":
                 failed = ev["msg"]
             elif kind == "done":
                 ok = True
         rc = proc.wait()
         if ok:
-            GLib.idle_add(pp.finish_ok)
-            GLib.idle_add(self._show, 6)
+            GLib.idle_add(self._finished)
         else:
-            if failed is None:
-                failed = ("Authentication was cancelled." if rc in (126, 127)
-                          else f"The installer stopped unexpectedly (exit {rc}).")
-            GLib.idle_add(pp.finish_error, failed)
-            GLib.idle_add(self._allow_retry)
+            GLib.idle_add(self._failed, failed or (
+                "Authentication was cancelled." if rc in (126, 127)
+                else f"The installer stopped unexpectedly (exit {rc})."))
 
-    def _allow_retry(self):
-        self.back.set_visible(True)
-        self.back.set_label("Start over")
-        self.back.disconnect_by_func(self._go_back)
-        self.back.connect("clicked", lambda *_: self._reset())
+    def _finished(self):
+        self.install_page.finish_ok()
+        self._show(self.pages.index(self.done_page))
 
-    def _reset(self):
-        self.back.set_label("Back")
-        self.back.connect("clicked", self._go_back)
-        self.progress_page.error.set_visible(False)
-        self.progress_page._current = None
-        self._show(1, forward=False)
+    def _failed(self, msg):
+        self.install_page.fail(msg)
+        self.refresh_nav()
 
 
 class InstallApp(Adw.Application):
@@ -618,7 +1346,7 @@ class InstallApp(Adw.Application):
     def _activate(self, app):
         Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         css = Gtk.CssProvider()
-        css.load_from_data(CSS)
+        load_css(css, CSS)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         InstallWindow(app).present()

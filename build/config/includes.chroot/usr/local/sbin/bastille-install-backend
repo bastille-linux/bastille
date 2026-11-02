@@ -11,7 +11,12 @@ wizard) or a shell can drive it.
 Install config (stdin, one JSON object — secrets never touch argv):
     {"disk": "/dev/sda", "confirm": "/dev/sda",
      "passphrase": "...", "username": "alice", "password": "...",
-     "fullname": "Alice", "hostname": "bastille"}
+     "fullname": "Alice", "hostname": "bastille",
+     # optional:
+     "level": "standard"|"high"|"anon", "profiles": ["work"],
+     "fake_duress_target": "decoy",
+     "accounts": ["guerrilla", "pgp"], "apps": ["browser", "mail"],
+     "pins": {"duress": "1234", "fake-duress": "4321", "dsm": "5555"}}
 
 Disk layout (GPT):
     p1  512 MiB  FAT32  EFI system partition
@@ -49,19 +54,44 @@ USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,30}$")
 HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
 
 _STEPS = [
-    ("check",     "Checking the target disk"),
-    ("partition", "Partitioning"),
-    ("format",    "Creating encrypted volume"),
-    ("copy",      "Copying system files"),
-    ("configure", "Configuring the installed system"),
-    ("initramfs", "Building the boot image"),
+    ("check",      "Checking the disk"),
+    ("partition",  "Partitioning"),
+    ("format",     "Creating the encrypted volume"),
+    ("copy",       "Copying system files"),
+    ("configure",  "Configuring the system"),
+    ("apps",       "Installing selected apps"),
+    ("personalise", "Setting up profiles, accounts and PINs"),
+    ("initramfs",  "Building the boot image"),
     ("bootloader", "Installing the bootloader"),
-    ("finish",    "Finishing up"),
+    ("finish",     "Finishing up"),
 ]
 # Rough weight of each step in the overall progress bar.
-_WEIGHTS = {"check": 0.02, "partition": 0.05, "format": 0.08, "copy": 0.55,
-            "configure": 0.07, "initramfs": 0.12, "bootloader": 0.08,
-            "finish": 0.03}
+_WEIGHTS = {"check": 0.02, "partition": 0.04, "format": 0.07, "copy": 0.45,
+            "configure": 0.06, "apps": 0.10, "personalise": 0.03,
+            "initramfs": 0.12, "bootloader": 0.08, "finish": 0.03}
+
+LEVELS = ("standard", "high", "anon")
+PIN_TYPES = ("duress", "fake-duress", "dsm")
+ACCOUNT_TYPES = ("email", "guerrilla", "pgp", "signal", "session", "wireguard")
+PROFILE_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+
+# Optional apps (the Settings app is always kept). Maps to extra Debian
+# packages the app needs beyond the GTK4 runtime already in the image.
+APP_DEPS = {
+    "browser": ["tor"],
+    "mail": ["gir1.2-soup-3.0"],
+    "messages": [],
+    "calendar": [],
+    "files": [],
+    "notes": [],
+    "documents": ["libreoffice-writer"],
+    "sheets": ["libreoffice-calc"],
+    "presentations": ["libreoffice-impress"],
+    "terminal": ["gir1.2-vte-3.91"],
+    "maps": ["gir1.2-webkit-6.0"],
+    "music": ["gir1.2-gst-1.0", "gstreamer1.0-plugins-good", "python3-mutagen"],
+    "weather": ["gir1.2-soup-3.0"],
+}
 
 
 def emit(**ev):
@@ -205,6 +235,22 @@ class Installer:
             raise InstallError("disk passphrase must be at least 8 characters")
         if not HOSTNAME_RE.match(c.get("hostname", "bastille")):
             raise InstallError("invalid hostname")
+        if c.get("level", "high") not in LEVELS:
+            raise InstallError("invalid security level")
+        for name in c.get("profiles", []):
+            if not PROFILE_RE.match(name):
+                raise InstallError(f"invalid profile name: {name!r}")
+        for a in c.get("accounts", []):
+            if a not in ACCOUNT_TYPES:
+                raise InstallError(f"unknown account type: {a!r}")
+        for a in c.get("apps", []):
+            if a not in APP_DEPS:
+                raise InstallError(f"unknown app: {a!r}")
+        for t, pin in c.get("pins", {}).items():
+            if t not in PIN_TYPES:
+                raise InstallError(f"unknown PIN type: {t!r}")
+            if not (pin.isdigit() and len(pin) >= 4):
+                raise InstallError("PINs must be at least 4 digits")
         size = int(open(f"/sys/class/block/{os.path.basename(self.disk)}/size").read()) * 512
         if size < 8 * 1024 ** 3:
             raise InstallError("disk is smaller than 8 GiB")
@@ -394,6 +440,88 @@ class Installer:
         with open(f"{t}/etc/bastille/installed", "w") as f:
             f.write("1\n")
 
+    def network_up(self):
+        p = subprocess.run(["getent", "hosts", "deb.debian.org"],
+                           capture_output=True, text=True, timeout=10)
+        return p.returncode == 0
+
+    def apps(self):
+        """Keep the selected optional apps; install their extra dependencies.
+
+        The app launchers ship in the image. Unselected ones are removed from
+        the target. Their dependencies are fetched with apt, which needs a
+        network: if there is none, the list is left for first boot.
+        """
+        t = TARGET
+        chosen = [a for a in self.cfg.get("apps", []) if a in APP_DEPS]
+        for app in APP_DEPS:
+            if app in chosen:
+                continue
+            for p in (f"usr/local/bin/bastille-{app}",
+                      f"usr/share/applications/bastille-{app}.desktop"):
+                try:
+                    os.unlink(f"{t}/{p}")
+                except FileNotFoundError:
+                    pass
+        deps = sorted({d for a in chosen for d in APP_DEPS[a]})
+        os.makedirs(f"{t}/etc/bastille", exist_ok=True)
+        with open(f"{t}/etc/bastille/apps.selected", "w") as f:
+            f.write("\n".join(["settings"] + chosen) + "\n")
+        self.apps_pending = []
+        if not deps:
+            log("no extra packages needed")
+            return
+        try:
+            online = self.network_up()
+        except Exception:  # noqa: BLE001
+            online = False
+        if not online:
+            log("no network: apps will finish installing on first boot")
+            self.apps_pending = deps
+        else:
+            shutil.copy("/etc/resolv.conf", f"{t}/etc/resolv.conf") \
+                if os.path.exists("/etc/resolv.conf") else None
+            r1 = chroot("apt-get", "update", check=False)
+            r2 = chroot("apt-get", "install", "-y", "--no-install-recommends", *deps,
+                        check=False)
+            if r1.returncode or r2.returncode:
+                log("package install failed: apps will finish installing on first boot")
+                self.apps_pending = deps
+        if self.apps_pending:
+            with open(f"{t}/etc/bastille/apps.pending", "w") as f:
+                f.write("\n".join(self.apps_pending) + "\n")
+
+    def personalise(self):
+        """Security level, profiles, online-account intents and PINs."""
+        import json as _json
+        c, t = self.cfg, TARGET
+        level = c.get("level", "high")
+        with open(f"{t}/etc/bastille/profile", "w") as f:
+            f.write(level)
+        profiles = {
+            "level": level,
+            "main": {"owner": c["username"]},
+            "decoy": "decoy",
+            "extra": c.get("profiles", []),
+            "fake_duress_target": c.get("fake_duress_target", "decoy"),
+            # Containers (LUKS2 images) are created at first boot, when the
+            # user can unlock them with their own PIN.
+            "containers_created": False,
+        }
+        with open(f"{t}/etc/bastille/profiles.json", "w") as f:
+            _json.dump(profiles, f, indent=2)
+        os.chmod(f"{t}/etc/bastille/profiles.json", 0o600)
+        # Online accounts need credentials: record the intent, the first-boot
+        # setup (and the apps) finish them. Nothing is contacted from here.
+        with open(f"{t}/etc/bastille/first-boot.json", "w") as f:
+            _json.dump({"accounts": c.get("accounts", []),
+                        "apps_pending": getattr(self, "apps_pending", [])}, f, indent=2)
+        os.chmod(f"{t}/etc/bastille/first-boot.json", 0o600)
+        for ptype, pin in c.get("pins", {}).items():
+            chroot("/usr/local/sbin/bastille-set-pins", f"--type={ptype}", "--pin-stdin",
+                   input=pin + "\n")
+            log(f"{ptype} PIN set")
+
     def build_initramfs(self):
         # initramfs-tools needs a usable /etc/mtab and the cryptsetup hooks.
         chroot("update-initramfs", "-c", "-k", "all")
@@ -441,6 +569,10 @@ class Installer:
             self.bind_mounts()
             self.step("configure")
             self.configure()
+            self.step("apps")
+            self.apps()
+            self.step("personalise")
+            self.personalise()
             self.step("initramfs")
             self.build_initramfs()
             self.step("bootloader")

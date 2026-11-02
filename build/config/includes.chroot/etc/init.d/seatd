@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+# seatd with a log file. Debian's stock script backgrounds seatd and discards
+# its stderr, which makes "failed to open seat" impossible to diagnose.
+
+description="Seat management daemon (for sway via libseat)"
+command="/bin/sh"
+command_args="-c 'exec /usr/sbin/seatd -g video -l debug >>/var/log/seatd.log 2>&1'"
+command_background="yes"
+pidfile="/run/seatd.pid"
+
+depend() {
+    after udev
+}
+
+start_pre() {
+    touch /var/log/seatd.log
+    chmod 644 /var/log/seatd.log
+    return 0
+}
