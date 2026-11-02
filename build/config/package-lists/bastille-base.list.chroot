@@ -6,6 +6,10 @@ sysvinit-core
 sysvinit-utils
 initscripts
 openrc
+# debootstrap installs `init` + systemd-sysv even with --exclude, and apt's solver
+# will not swap an already-installed init on its own. A trailing '-' is apt syntax
+# for "remove": it is passed through unchanged by live-build (xargs apt-get install).
+systemd-sysv-
 openssh-server
 dbus
 udev
