@@ -47,7 +47,7 @@ if ! grep -q hidepid /etc/fstab 2>/dev/null; then
 fi
 
 # Add user to proc group so it can still read its own /proc entries
-grep -q '^proc:' /etc/group || groupadd -g 990 proc
+grep -q '^proc:' /etc/group || groupadd -r proc
 usermod -aG proc user || true
 
 # Disable core dumps via limits.conf
