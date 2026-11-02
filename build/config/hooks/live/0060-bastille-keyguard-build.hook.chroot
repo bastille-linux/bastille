@@ -23,10 +23,13 @@ mkdir -p /var/lib/thl/profiles
 chmod 700 /var/lib/thl/profiles
 mkdir -p /run/thl  # created fresh each boot by tmpfiles.d
 
-# tmpfiles.d entry so /run/thl is created at boot
-cat > /etc/tmpfiles.d/thl.conf << 'EOF'
-d /run/thl 0700 root root -
-d /run/thl/profiles 0700 root root -
-EOF
+# No systemd-tmpfiles on this system: recreate the runtime dirs at every boot from
+# the OpenRC "local" service (enabled in hook 0090), which runs /etc/local.d/*.start.
+install -d -m 755 /etc/local.d
+cat > /etc/local.d/bastille-run-dirs.start << 'LOCALEOF'
+#!/bin/sh
+install -d -m 0700 /run/thl /run/thl/profiles
+LOCALEOF
+chmod 755 /etc/local.d/bastille-run-dirs.start
 
 echo "bastille-keyguard, gpggrid, bastille-profile installed."
