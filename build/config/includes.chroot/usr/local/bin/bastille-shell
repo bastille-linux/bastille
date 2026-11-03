@@ -1,0 +1,8 @@
+#!/bin/sh
+# Starts the Bastille desktop shell, or forwards a command to the running one:
+#   bastille-shell --launcher [search|apps|files|clipboard|actions] | --notifications | --control | --dnd
+# gtk4-layer-shell has to be loaded before libwayland-client, hence the preload.
+lib=$(/sbin/ldconfig -p 2>/dev/null | awk '/libgtk4-layer-shell\.so/{print $NF; exit}')
+[ -n "$lib" ] && export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
+export GTK_A11Y=none
+exec python3 /usr/local/lib/bastille-shell/main.py "$@"

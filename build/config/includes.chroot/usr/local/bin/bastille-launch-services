@@ -2,8 +2,11 @@
 # bastille-launch-services — started by Sway exec_always
 # Starts user-space daemons that need the Wayland session running.
 
-# mako notification daemon
-pgrep -x mako >/dev/null 2>&1 || mako &
+# clipboard history for the launcher (notifications are served by bastille-shell)
+pgrep -f 'wl-paste.*cliphist' >/dev/null 2>&1 || {
+    wl-paste --type text --watch cliphist store &
+    wl-paste --type image --watch cliphist store &
+}
 
 # polkit agent
 pgrep -f lxpolkit >/dev/null 2>&1 || lxpolkit &

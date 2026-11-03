@@ -4,7 +4,6 @@
 # ── Variables ─────────────────────────────────────────────────────────────────
 set $mod Mod4
 set $term foot
-set $launcher bastille-launcher
 set $locker swaylock -f
 
 # Bastille colours
@@ -16,7 +15,7 @@ set $text        #c9d1d9
 set $urgent      #f85149
 
 # ── Output / wallpaper ────────────────────────────────────────────────────────
-output * bg #0b0c10 solid_color
+output * bg /usr/share/backgrounds/bastille/default.jpg fill
 
 # ── Input ─────────────────────────────────────────────────────────────────────
 input type:keyboard {
@@ -31,13 +30,13 @@ input type:touchpad {
 }
 
 # ── Appearance ────────────────────────────────────────────────────────────────
-gaps inner 6
-gaps outer 4
+gaps inner 8
+gaps outer 6
 default_border pixel 1
 default_floating_border pixel 1
 smart_gaps on
 smart_borders on
-font pango:Noto Sans 10
+font pango:Inter 10
 
 # Window colours:        border    bg        text      indicator child_border
 client.focused          $accent   $surface  $text     $accent   $accent
@@ -45,13 +44,13 @@ client.focused_inactive $border   $bg       $text     $border   $border
 client.unfocused        $border   $bg       #8b949e   $border   $border
 client.urgent           $urgent   $bg       $text     $urgent   $urgent
 
-# ── Status bar (Waybar) ───────────────────────────────────────────────────────
-bar {
-    swaybar_command waybar
-}
+# ── Shell ─────────────────────────────────────────────────────────────────────
+# Menu bar, dock, launcher, notification centre and control centre are all
+# bastille-shell (layer-shell); there is no swaybar/waybar.
+exec --no-startup-id bastille-shell
 
 # ── Autostart ─────────────────────────────────────────────────────────────────
-# mako (notifications), lxpolkit (pkexec dialogs) and kanshi are started here.
+# lxpolkit (pkexec dialogs), kanshi and the clipboard history are started here.
 exec --no-startup-id bastille-launch-services
 exec --no-startup-id swayidle -w \
     timeout 180 'swaylock -f' \
@@ -63,7 +62,12 @@ exec --no-startup-id bastille-autostart
 
 # ── Key bindings ──────────────────────────────────────────────────────────────
 bindsym $mod+Return       exec $term
-bindsym $mod+Space        exec $launcher
+bindsym $mod+Space        exec bastille-shell --launcher search
+bindsym $mod+1            exec bastille-shell --launcher apps
+bindsym $mod+2            exec bastille-shell --launcher files
+bindsym $mod+3            exec bastille-shell --launcher clipboard
+bindsym $mod+c            exec bastille-shell --control
+bindsym $mod+Shift+n      exec bastille-shell --notifications
 bindsym $mod+q            kill
 bindsym $mod+Shift+r      reload
 bindsym $mod+Escape       exec $locker
@@ -88,14 +92,15 @@ bindsym $mod+Shift+k      move up
 bindsym $mod+Shift+l      move right
 
 # Workspaces
-bindsym $mod+1 workspace number 1
-bindsym $mod+2 workspace number 2
-bindsym $mod+3 workspace number 3
-bindsym $mod+4 workspace number 4
-bindsym $mod+5 workspace number 5
-bindsym $mod+Shift+1 move container to workspace number 1
-bindsym $mod+Shift+2 move container to workspace number 2
-bindsym $mod+Shift+3 move container to workspace number 3
+# (Super+1/2/3 open the launcher, so workspaces live on Super+Ctrl)
+bindsym $mod+Ctrl+1 workspace number 1
+bindsym $mod+Ctrl+2 workspace number 2
+bindsym $mod+Ctrl+3 workspace number 3
+bindsym $mod+Ctrl+4 workspace number 4
+bindsym $mod+Ctrl+5 workspace number 5
+bindsym $mod+Ctrl+Shift+1 move container to workspace number 1
+bindsym $mod+Ctrl+Shift+2 move container to workspace number 2
+bindsym $mod+Ctrl+Shift+3 move container to workspace number 3
 
 # Layout
 bindsym $mod+b            splith
@@ -115,9 +120,9 @@ mode "resize" {
 }
 
 # Media keys
-bindsym XF86AudioRaiseVolume  exec pactl set-sink-volume @DEFAULT_SINK@ +5%
-bindsym XF86AudioLowerVolume  exec pactl set-sink-volume @DEFAULT_SINK@ -5%
-bindsym XF86AudioMute         exec pactl set-sink-mute @DEFAULT_SINK@ toggle
+bindsym XF86AudioRaiseVolume  exec wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+
+bindsym XF86AudioLowerVolume  exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
+bindsym XF86AudioMute         exec wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle
 bindsym XF86MonBrightnessUp   exec brightnessctl set +5%
 bindsym XF86MonBrightnessDown exec brightnessctl set 5%-
 bindsym Print                 exec grim -g "$(slurp)" - | wl-copy
