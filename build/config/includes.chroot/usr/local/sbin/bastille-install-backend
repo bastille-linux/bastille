@@ -240,9 +240,16 @@ class Installer:
         for name in c.get("profiles", []):
             if not PROFILE_RE.match(name):
                 raise InstallError(f"invalid profile name: {name!r}")
-        for a in c.get("accounts", []):
+        accts = c.get("accounts", {})
+        for a, details in (accts.items() if isinstance(accts, dict) else [(x, {}) for x in accts]):
             if a not in ACCOUNT_TYPES:
                 raise InstallError(f"unknown account type: {a!r}")
+            if not isinstance(details, dict) or any(
+                    not isinstance(v, str) or len(v) > 20000 for v in details.values()):
+                raise InstallError(f"bad details for account {a!r}")
+            for k, v in details.items():
+                if k != "config" and ("\n" in v or "\r" in v):
+                    raise InstallError(f"bad value for {a}.{k}")
         for a in c.get("apps", []):
             if a not in APP_DEPS:
                 raise InstallError(f"unknown app: {a!r}")
@@ -427,15 +434,9 @@ class Installer:
         # greetd: log in with a password instead of the live auto-login.
         with open(f"{t}/etc/greetd/config.toml", "w") as f:
             f.write('[terminal]\nvt = 7\n\n[default_session]\n'
-                    'command = "agreety --cmd /usr/local/bin/bastille-session"\n'
+                    'command = "/usr/local/bin/bastille-greeter-session"\n'
                     'user = "greeter"\n')
 
-        # First boot of the installed system runs the setup wizard again
-        # (PINs, VPN, apps), so make sure a stale live flag doesn't suppress it.
-        try:
-            os.unlink(f"{t}/etc/bastille/setup.done")
-        except FileNotFoundError:
-            pass
         os.makedirs(f"{t}/etc/bastille", exist_ok=True)
         with open(f"{t}/etc/bastille/installed", "w") as f:
             f.write("1\n")
@@ -450,7 +451,7 @@ class Installer:
 
         The app launchers ship in the image. Unselected ones are removed from
         the target. Their dependencies are fetched with apt, which needs a
-        network: if there is none, the list is left for first boot.
+        network: if there is none, the list is left for the bastille-apps-pending boot service.
         """
         t = TARGET
         chosen = [a for a in self.cfg.get("apps", []) if a in APP_DEPS]
@@ -476,7 +477,7 @@ class Installer:
         except Exception:  # noqa: BLE001
             online = False
         if not online:
-            log("no network: apps will finish installing on first boot")
+            log("no network: bastille-apps-pending installs them once the network is up")
             self.apps_pending = deps
         else:
             shutil.copy("/etc/resolv.conf", f"{t}/etc/resolv.conf") \
@@ -485,11 +486,85 @@ class Installer:
             r2 = chroot("apt-get", "install", "-y", "--no-install-recommends", *deps,
                         check=False)
             if r1.returncode or r2.returncode:
-                log("package install failed: apps will finish installing on first boot")
+                log("package install failed: bastille-apps-pending installs them once the network is up")
                 self.apps_pending = deps
         if self.apps_pending:
             with open(f"{t}/etc/bastille/apps.pending", "w") as f:
                 f.write("\n".join(self.apps_pending) + "\n")
+
+    def accounts(self):
+        """Apply the online accounts collected by the wizard.
+
+        email / guerrilla  -> Mail app accounts.json (+ ~/.msmtprc for sending)
+        signal / session   -> Messages app accounts.json (verification happens in the app)
+        pgp                -> a real key pair generated for the user
+        wireguard          -> /etc/wireguard/wg0.conf
+        """
+        import json as _json
+        c, t = self.cfg, TARGET
+        accts = c.get("accounts", {})
+        if isinstance(accts, list):
+            accts = {a: {} for a in accts}
+        if not accts:
+            return
+        user = c["username"]
+        home = f"{t}/home/{user}"
+        mail_dir = f"{home}/.local/share/bastille-mail"
+        msg_dir = f"{home}/.local/share/bastille-messages"
+
+        mail = []
+        if "email" in accts:
+            e = accts["email"]
+            mail.append({"type": "email", "address": e["address"],
+                         "imap": {"host": e["imap_host"], "port": 993},
+                         "smtp": {"host": e["smtp_host"], "port": 587}})
+            rc = (f"defaults\\nauth on\\ntls on\\ntls_trust_file /etc/ssl/certs/ca-certificates.crt\\n\\n"
+                  f"account default\\nhost {e['smtp_host']}\\nport 587\\ntls_starttls on\\n"
+                  f"from {e['address']}\\nuser {e['address']}\\npassword {e['password']}\\n")
+            with open(f"{home}/.msmtprc", "w") as f:
+                f.write(rc)
+            os.chmod(f"{home}/.msmtprc", 0o600)
+        if "guerrilla" in accts:
+            mail.append({"type": "guerrilla", "name": accts["guerrilla"].get("name", "")})
+        if mail:
+            os.makedirs(mail_dir, exist_ok=True)
+            with open(f"{mail_dir}/accounts.json", "w") as f:
+                _json.dump(mail, f, indent=2)
+            os.chmod(f"{mail_dir}/accounts.json", 0o600)
+
+        msgs = {}
+        if "signal" in accts:
+            msgs["signal"] = {"number": accts["signal"]["number"].replace(" ", ""), "verified": False}
+        if "session" in accts:
+            msgs["session"] = {"name": accts["session"].get("name", ""), "created": False}
+        if msgs:
+            os.makedirs(msg_dir, exist_ok=True)
+            with open(f"{msg_dir}/accounts.json", "w") as f:
+                _json.dump(msgs, f, indent=2)
+            os.chmod(f"{msg_dir}/accounts.json", 0o600)
+
+        if "wireguard" in accts:
+            os.makedirs(f"{t}/etc/wireguard", mode=0o700, exist_ok=True)
+            with open(f"{t}/etc/wireguard/wg0.conf", "w") as f:
+                f.write(accts["wireguard"]["config"].rstrip() + "\\n")
+            os.chmod(f"{t}/etc/wireguard/wg0.conf", 0o600)
+            log("WireGuard configuration installed")
+
+        # Hand everything under the home to the user before running gpg as them.
+        chroot("chown", "-R", f"{user}:{user}", f"/home/{user}/.local", check=False)
+        if os.path.exists(f"{home}/.msmtprc"):
+            chroot("chown", f"{user}:{user}", f"/home/{user}/.msmtprc", check=False)
+
+        if "pgp" in accts:
+            p = accts["pgp"]
+            os.makedirs(f"{home}/.gnupg", mode=0o700, exist_ok=True)
+            chroot("chown", f"{user}:{user}", f"/home/{user}/.gnupg", check=False)
+            uid = f"{p['name']} <{p['email']}>"
+            r = chroot("runuser", "-u", user, "--", "env", f"HOME=/home/{user}",
+                       "gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0",
+                       "--quick-generate-key", uid, "default", "default", "2y",
+                       input=p["passphrase"] + "\\n", check=False)
+            log("PGP key generated" if r.returncode == 0 else "PGP key generation failed")
 
     def personalise(self):
         """Security level, profiles, online-account intents and PINs."""
@@ -513,10 +588,13 @@ class Installer:
         os.chmod(f"{t}/etc/bastille/profiles.json", 0o600)
         # Online accounts need credentials: record the intent, the first-boot
         # setup (and the apps) finish them. Nothing is contacted from here.
+        self.accounts()
+        # Only leftovers the installer could not finish (apps needing a network).
         with open(f"{t}/etc/bastille/first-boot.json", "w") as f:
-            _json.dump({"accounts": c.get("accounts", []),
-                        "apps_pending": getattr(self, "apps_pending", [])}, f, indent=2)
+            _json.dump({"apps_pending": getattr(self, "apps_pending", [])}, f, indent=2)
         os.chmod(f"{t}/etc/bastille/first-boot.json", 0o600)
+        # Everything the old first-boot wizard asked for is collected by the installer.
+        open(f"{t}/etc/bastille/setup.done", "w").close()
         for ptype, pin in c.get("pins", {}).items():
             chroot("/usr/local/sbin/bastille-set-pins", f"--type={ptype}", "--pin-stdin",
                    input=pin + "\n")

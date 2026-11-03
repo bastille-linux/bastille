@@ -1,0 +1,9 @@
+# PAM service for the live auto-login session started by greetd.
+# No authentication (the live user has no password prompt); the session stack
+# registers the login with elogind so polkit sees a local, active session.
+auth     required   pam_permit.so
+account  required   pam_permit.so
+password required   pam_deny.so
+session  required   pam_limits.so
+session  required   pam_unix.so
+session  optional   pam_elogind.so

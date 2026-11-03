@@ -85,6 +85,7 @@ vt = 7
 [default_session]
 command = "/usr/local/bin/bastille-session"
 user = "user"
+service = "bastille-session"
 TOML
 chmod 755 /usr/local/bin/bastille-session /etc/init.d/greetd \
     /usr/local/sbin/bastille-install-backend

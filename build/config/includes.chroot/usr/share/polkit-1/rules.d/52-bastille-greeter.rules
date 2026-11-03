@@ -1,0 +1,9 @@
+// The login screen (user "greeter") has no logind session, so polkit would deny
+// its Restart / Power off buttons. Allow exactly those two actions for it.
+polkit.addRule(function(action, subject) {
+    if (subject.user !== "greeter") return;
+    if (action.id === "org.freedesktop.login1.power-off" ||
+        action.id === "org.freedesktop.login1.reboot") {
+        return polkit.Result.YES;
+    }
+});

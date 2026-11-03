@@ -1,0 +1,11 @@
+#!/bin/sh
+# Started by greetd as the 'greeter' user: runs the login screen inside cage.
+# There is no logind session at this point, so make a private runtime dir.
+export XDG_RUNTIME_DIR="/tmp/greeter-runtime-$(id -u)"
+mkdir -p -m 0700 "$XDG_RUNTIME_DIR"
+export XDG_SESSION_TYPE=wayland
+export LIBSEAT_BACKEND=seatd
+export WLR_RENDERER="${WLR_RENDERER:-pixman}"
+export WLR_NO_HARDWARE_CURSORS="${WLR_NO_HARDWARE_CURSORS:-1}"
+export WLR_DRM_NO_ATOMIC="${WLR_DRM_NO_ATOMIC:-1}"
+exec cage -s -- /usr/local/bin/bastille-greeter

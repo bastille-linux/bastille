@@ -44,7 +44,15 @@ window.bastille headerbar { background: #151515; border-bottom: 1px solid rgba(2
 .nav-label { font-size: 10px; font-weight: 600; color: #898781; letter-spacing: 0.06em;
              padding: 10px 8px 4px; }
 .nav-item { border-radius: 8px; padding: 7px 10px; color: #c3c2b7; font-size: 13px; }
-.nav-item.active { background: rgba(42,120,214,0.12); color: #f0efec; }
+button.nav-item { background: transparent; background-image: none; border: none; box-shadow: none;
+                  min-height: 0; margin-bottom: 1px; }
+button.nav-item:hover { background: rgba(255,255,255,0.05); }
+button.nav-item.active, .nav-item.active { background: rgba(42,120,214,0.12); color: #f0efec; }
+button.nav-item.locked { opacity: 0.4; }
+.formrow { background: rgba(255,255,255,0.02); }
+.form-error { color: #f47070; font-size: 12px; }
+.confbox { border: 1px solid rgba(255,255,255,0.10); border-radius: 6px; }
+textview.conf, textview.conf text { background: #1a1a19; color: #f0efec; font-size: 12px; }
 .panel-header { padding: 20px 0 16px; border-bottom: 1px solid rgba(255,255,255,0.10); }
 .panel-title { font-size: 18px; font-weight: 600; color: #f0efec; }
 .panel-sub { font-size: 12px; color: #898781; }
@@ -348,7 +356,7 @@ class State:
         self.level = "high"
         self.profiles = []            # extra profile names
         self.fake_target = "decoy"
-        self.accounts = {"guerrilla", "pgp"}
+        self.accounts = {}            # key -> details dict
         self.apps = set()
         self.pins = {}                # type -> digits
 
@@ -432,7 +440,9 @@ class Page(Gtk.ScrolledWindow):
         head.append(self.title_lbl)
         head.append(self.sub_lbl)
         self.box.append(head)
-        self.set_child(self.box)
+        clamp = Adw.Clamp(maximum_size=980, tightening_threshold=760, child=self.box)
+        clamp.set_margin_top(8)
+        self.set_child(clamp)
         self.build()
 
     def add(self, w):
@@ -464,7 +474,7 @@ class WelcomePage(Page):
                 ("RAM scrub on shutdown", "Memory is overwritten before power-off", "rd", "ram", "Included", "ok"),
                 ("USB inspector", "Flags forensic extraction tools · Bluetooth blocked by default", "am", "usb", "Included", "ok"),
                 ("Intel ME neutralizer", "Firmware tools and a boot-chain watchdog", "bl", "chip", "Included", "ok"),
-                ("Lock and duress PINs", "Set up on first boot · no systemd, no admin login", "gn", "lock", "First boot", "off")]
+                ("Lock and duress PINs", "Set up in this wizard · no systemd, no admin login", "gn", "lock", "Set up here", "off")]
         self.add(section("What’s built in", Card(*[
             Row(t, d, tone, ic, [badge(bt, bk)]) for t, d, tone, ic, bt, bk in rows])))
         trying = Row("Just trying it out?",
@@ -494,8 +504,10 @@ class DiskPage(Page):
         self._rows = []
 
     def rescan(self):
+        prev = self.st.disk["path"] if self.st.disk else None
         self.list_card.clear()
         self._group, self._rows = None, []
+        self._radio_by_path = {}
         self.st.disk = None
         try:
             disks = list_disks()
@@ -506,6 +518,8 @@ class DiskPage(Page):
             self.msg.set_text("" if disks else "No disks found. Attach a disk and press Rescan disks.")
         for d in disks:
             self.list_card.append(self._disk_row(d))
+        if prev in self._radio_by_path:          # keep the choice when revisiting the step
+            self._radio_by_path[prev].set_active(True)
         self._update_layout()
         self.changed()
 
@@ -526,6 +540,7 @@ class DiskPage(Page):
             badges, usable = [badge("Bastille is running from this disk", "warn")], False
         elif d["too_small"]:
             badges, usable = [badge("Smaller than 8 GB", "warn")], False
+        self._radio_by_path[d["path"]] = radio
         row = Row(d["model"], desc, "bl" if not d["removable"] else "am",
                   "ssd" if not d["removable"] else "stick",
                   badges + ([radio] if usable else [radio]), mono_desc=True)
@@ -798,40 +813,213 @@ class ProfilesPage(Page):
         self.extra_card.append(self.add_row)
 
 
+ACCOUNT_FIELDS = {
+    # key: [(field, label, placeholder, secret)]
+    "email": [("address", "Email address", "you@example.com", False),
+              ("password", "Password", "", True),
+              ("imap_host", "IMAP server", "imap.example.com", False),
+              ("smtp_host", "SMTP server", "smtp.example.com", False)],
+    "guerrilla": [("name", "Address name (optional)", "leave empty for a random one", False)],
+    "pgp": [("name", "Full name", "", False),
+            ("email", "Email address", "you@example.com", False),
+            ("passphrase", "Key passphrase", "", True),
+            ("passphrase2", "Confirm passphrase", "", True)],
+    "signal": [("number", "Phone number", "+370 600 00000", False)],
+    "session": [("name", "Display name (optional)", "", False)],
+    "wireguard": [],
+}
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
+
+
+def validate_account(key, d):
+    """Return an error message, or None when the details are usable."""
+    if key == "email":
+        if not _EMAIL_RE.match(d.get("address", "")):
+            return "Enter a valid email address."
+        if not d.get("password"):
+            return "Enter the mailbox password."
+        for f in ("imap_host", "smtp_host"):
+            if not _HOST_RE.match(d.get(f, "")):
+                return "Enter the IMAP and SMTP server names."
+    elif key == "guerrilla":
+        if d.get("name") and not re.match(r"^[a-z0-9._-]{1,40}$", d["name"]):
+            return "Use lowercase letters, digits, '.', '-' and '_' only."
+    elif key == "pgp":
+        if not d.get("name", "").strip():
+            return "Enter the name for the key."
+        if not _EMAIL_RE.match(d.get("email", "")):
+            return "Enter a valid email address for the key."
+        if len(d.get("passphrase", "")) < 8:
+            return "The key passphrase must be at least 8 characters."
+        if d.get("passphrase") != d.get("passphrase2"):
+            return "The two key passphrases do not match."
+    elif key == "signal":
+        if not re.match(r"^\+\d{6,15}$", d.get("number", "").replace(" ", "")):
+            return "Enter the number in international format, e.g. +37060000000."
+    elif key == "session":
+        if len(d.get("name", "")) > 40:
+            return "The display name is too long."
+    elif key == "wireguard":
+        cfg = d.get("config", "")
+        if "[Interface]" not in cfg or "PrivateKey" not in cfg or "[Peer]" not in cfg:
+            return "That does not look like a WireGuard .conf (needs [Interface] and [Peer])."
+        if len(cfg) > 20000:
+            return "The configuration is too large."
+    return None
+
+
 class AccountsPage(Page):
     title = "Online accounts"
 
     def build(self):
-        self._btns = {}
+        self._rows = {}
         for title, items in ACCOUNT_GROUPS:
-            rows = []
+            cards = []
             for key, name, desc, tone, ic in items:
-                btn = button("Add", small=True)
-                btn.connect("clicked", lambda _b, k=key: self._toggle(k))
-                self._btns[key] = btn
-                rows.append(Row(name, desc, tone, ic, [btn]))
-            self.add(section(title, Card(*rows)))
-        self.add(Card(Row("Sign-in details are asked for after the first restart",
-                          "Nothing is sent anywhere during install. Accounts that need a password or login "
-                          "code finish setting up inside their app.", "bl", "info")))
+                cards.append(self._make(key, name, desc, tone, ic))
+            card = Card(*[c for pair in cards for c in pair])
+            self.add(section(title, card))
+        self.add(Card(Row("Saved on the encrypted disk",
+                          "Details stay on this computer. Signal and Session verify or link inside their own "
+                          "app after install, because that needs a code sent to you.", "bl", "info")))
         self._sync()
 
-    def _toggle(self, key):
-        self.st.accounts.symmetric_difference_update({key})
+    def _make(self, key, name, desc, tone, ic):
+        suffix = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
+        row = Row(name, desc, tone, ic, [suffix])
+        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        form.add_css_class("formbox")
+        fields = {}
+        for fname, flabel, ph, secret in ACCOUNT_FIELDS[key]:
+            e = password_entry(320) if secret else text_entry("", 320)
+            if not secret:
+                e.set_placeholder_text(ph)
+            line = Gtk.Box(spacing=12)
+            lbl = label(flabel, "row-label")
+            lbl.set_size_request(170, -1)
+            line.append(lbl)
+            line.append(e)
+            form.append(line)
+            fields[fname] = e
+        tv = None
+        if key == "wireguard":
+            tv = Gtk.TextView(monospace=True, wrap_mode=Gtk.WrapMode.NONE, top_margin=8, bottom_margin=8,
+                              left_margin=10, right_margin=10)
+            tv.add_css_class("conf")
+            sw = Gtk.ScrolledWindow(min_content_height=130, max_content_height=130)
+            sw.set_child(tv)
+            sw.add_css_class("confbox")
+            load = button("Load .conf file…", small=True)
+            load.set_halign(Gtk.Align.START)
+            load.connect("clicked", lambda *_: self._load_conf(tv))
+            form.append(label("Paste the configuration from your VPN provider, or load the file.", "row-desc"))
+            form.append(sw)
+            form.append(load)
+        err = label("", "form-error", wrap=True)
+        err.set_visible(False)
+        form.append(err)
+        save, cancel = button("Save", "pri", small=True), button("Cancel", small=True)
+        btns = Gtk.Box(spacing=8, halign=Gtk.Align.END)
+        btns.append(cancel)
+        btns.append(save)
+        form.append(btns)
+        rev = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN, child=form)
+        wrap = Gtk.Box()
+        wrap.add_css_class("brow")
+        wrap.add_css_class("formrow")
+        wrap.append(rev)
+        rev.set_hexpand(True)
+        wrap.set_visible(False)
+        self._rows[key] = dict(row=row, suffix=suffix, rev=rev, wrap=wrap, fields=fields, tv=tv, err=err)
+        save.connect("clicked", lambda *_: self._save(key))
+        cancel.connect("clicked", lambda *_: self._close(key))
+        return row, wrap
+
+    def _load_conf(self, tv):
+        dlg = Gtk.FileDialog()
+
+        def done(d, res):
+            try:
+                f = d.open_finish(res)
+                ok, data, _ = f.load_contents(None)
+                if ok:
+                    tv.get_buffer().set_text(data.decode("utf-8", "replace"))
+            except Exception:  # noqa: BLE001
+                pass
+        dlg.open(self.wiz, None, done)
+
+    def _collect(self, key):
+        r = self._rows[key]
+        d = {n: e.get_text().strip() if n not in ("password", "passphrase", "passphrase2")
+             else e.get_text() for n, e in r["fields"].items()}
+        if r["tv"] is not None:
+            buf = r["tv"].get_buffer()
+            d["config"] = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+        return d
+
+    def _open(self, key):
+        for k in self._rows:
+            if k != key:
+                self._close(k)
+        r = self._rows[key]
+        cur = self.st.accounts.get(key, {})
+        for n, e in r["fields"].items():
+            e.set_text(cur.get(n, ""))
+        if r["tv"] is not None:
+            r["tv"].get_buffer().set_text(cur.get("config", ""))
+        r["err"].set_visible(False)
+        r["wrap"].set_visible(True)
+        r["rev"].set_reveal_child(True)
+
+    def _close(self, key):
+        r = self._rows[key]
+        r["rev"].set_reveal_child(False)
+        r["wrap"].set_visible(False)
+
+    def _save(self, key):
+        d = self._collect(key)
+        err = validate_account(key, d)
+        r = self._rows[key]
+        if err:
+            r["err"].set_text(err)
+            r["err"].set_visible(True)
+            return
+        self.st.accounts[key] = d
+        self._close(key)
         self._sync()
 
     def _sync(self):
-        for k, b in self._btns.items():
-            on = k in self.st.accounts
-            b.set_label("✓ Added" if on else "Add")
-            (b.add_css_class if on else b.remove_css_class)("btn-ok")
+        for key, r in self._rows.items():
+            suffix = r["suffix"]
+            while (c := suffix.get_first_child()) is not None:
+                suffix.remove(c)
+            if key in self.st.accounts:
+                suffix.append(badge("Added", "ok"))
+                edit, rm = button("Edit", small=True), button("Remove", small=True)
+                edit.connect("clicked", lambda _b, k=key: self._open(k))
+                rm.connect("clicked", lambda _b, k=key: (self.st.accounts.pop(k, None), self._sync()))
+                suffix.append(edit)
+                suffix.append(rm)
+            else:
+                add = button("Add", small=True)
+                add.connect("clicked", lambda _b, k=key: self._open(k))
+                suffix.append(add)
         n = len(self.st.accounts)
-        self.sub_lbl.set_text("Optional. Add the accounts you’ll use now, or skip and add them later. "
-                              "Details are saved on the encrypted disk.")
-        self.wiz.hint_override = f"{n} of {len(self._btns)} selected · skip this and add accounts later in Settings"
+        self.sub_lbl.set_text("Optional. Add the accounts you’ll use and fill in their details here. "
+                              "Everything is saved on the encrypted disk.")
+        self.wiz.hint_override = f"{n} of {len(self._rows)} added · you can skip any of them"
         self.changed()
 
     def on_show(self):
+        # Prefill the PGP details from the account name and email when empty.
+        s = self.st
+        r = self._rows["pgp"]["fields"]
+        if not r["name"].get_text() and s.full:
+            r["name"].set_text(s.full)
+        em = self.st.accounts.get("email", {}).get("address", "")
+        if not r["email"].get_text() and em:
+            r["email"].set_text(em)
         self._sync()
 
 
@@ -984,7 +1172,7 @@ class ReviewPage(Page):
             ("Profiles", f"Main ({LEVEL_NAME[s.level]}) and Decoy" + "".join(f" and {p}" for p in s.profiles),
              [badge(f"{2 + len(s.profiles)} profiles", "ok")]),
             ("Online accounts",
-             (" and ".join(ACCOUNT_NAME[a] for a in sorted(s.accounts)) + " · sign-in finishes after first restart")
+             (" and ".join(ACCOUNT_NAME[a] for a in sorted(s.accounts)) + " · details saved on the encrypted disk")
              if na else "None · add them later in Settings",
              [badge(f"{na} account{'s' if na != 1 else ''}", "ok" if na else "off")]),
             ("Duress PINs", (" and ".join(pins) + " set" if pins else "None set")
@@ -1124,8 +1312,8 @@ class DonePage(Page):
         self.next_card.clear()
         for t, d in [("1 · Unlock the disk", "Enter your passphrase at boot, before anything else loads"),
                      (f"2 · Sign in as {s.username}", "With the account password you just chose"),
-                     ("3 · First-boot setup", "Finish signing in to your online accounts, and set anything "
-                      "you skipped · about 2 minutes")]:
+                     ("3 · Your desktop is ready", "Apps, profiles, accounts and PINs are already set up — "
+                      "change any of it later in Settings")]:
             self.next_card.append(Row(t, d))
         self.setup_card.clear()
         n_apps = len(s.apps) + 1
@@ -1154,7 +1342,9 @@ class InstallWindow(Adw.ApplicationWindow):
         super().__init__(application=app)
         self.add_css_class("bastille")
         self.set_title("Install Bastille OS")
-        self.set_default_size(1024, 680)
+        self.set_default_size(1280, 800)
+        self.set_decorated(False)
+        self.visited = {0}
         self.state = State()
         self.hint_override = None
         self.ready = False
@@ -1168,13 +1358,12 @@ class InstallWindow(Adw.ApplicationWindow):
         self.idx = 0
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        root.append(Adw.HeaderBar())
         body = Gtk.Box(vexpand=True)
         root.append(body)
 
         self.nav = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.nav.add_css_class("nav")
-        self.nav.set_size_request(220, -1)
+        self.nav.set_size_request(260, -1)
         body.append(self.nav)
 
         main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
@@ -1208,26 +1397,59 @@ class InstallWindow(Adw.ApplicationWindow):
         self._show(0)
 
     # navigation ---------------------------------------------------------
+    def _page_ok(self, i):
+        """True when page i has everything the install needs from it."""
+        p = self.pages[i]
+        if p in (self.install_page, self.done_page, self.welcome):
+            return False
+        return p.validate() is None
+
+    def _required_pages(self):
+        return [self.disk_page, self.enc_page, self.user_page]
+
     def _build_nav(self):
         while (c := self.nav.get_first_child()) is not None:
             self.nav.remove(c)
+        busy = self.idx >= self.pages.index(self.install_page)
         i = 0
         for group, items in NAV:
             self.nav.append(label(group.upper(), "nav-label"))
             for text, ic in items:
-                done, active = i < self.idx, i == self.idx
-                row = Gtk.Box(spacing=8)
+                active = i == self.idx
+                done = (i != self.idx and i in self.visited and self._page_ok(i)) or \
+                       (i == 0 and self.idx > 0)
+                locked = busy or i >= self.pages.index(self.install_page)
+                row = Gtk.Button()
                 row.add_css_class("nav-item")
                 if active:
                     row.add_css_class("active")
+                if locked and not active:
+                    row.add_css_class("locked")
+                box = Gtk.Box(spacing=8)
                 color = "#3fb950" if done else "#2a78d6" if active else "#898781"
-                row.append(icon("check" if done else ic, color, 16))
-                row.append(label(text))
+                box.append(icon("check" if done else ic, color, 16))
+                box.append(label(text))
+                row.set_child(box)
+                row.set_halign(Gtk.Align.FILL)
+                row.connect("clicked", lambda _b, n=i: self.goto(n))
                 self.nav.append(row)
                 i += 1
 
+    def goto(self, n):
+        """Jump to a step from the nav. Install and Done are not reachable this way."""
+        inst = self.pages.index(self.install_page)
+        if self.idx >= inst or n >= inst or n == self.idx:
+            return
+        if n == self.pages.index(self.review_page):
+            for p in self._required_pages():
+                if p.validate() is not None:
+                    self._show(self.pages.index(p))
+                    return
+        self._show(n)
+
     def _show(self, i):
         self.idx = i
+        self.visited.add(i)
         self.hint_override = None
         self.stack.set_visible_child_name(str(i))
         self._build_nav()
@@ -1244,7 +1466,8 @@ class InstallWindow(Adw.ApplicationWindow):
         err = None if busy or done else page.validate()
         self.left_btn.set_visible(page is self.disk_page)
         self.skip_btn.set_visible(page is self.duress_page)
-        self.keep_btn.set_visible(done)
+        self.keep_btn.set_visible(done or page is self.welcome)
+        self.keep_btn.set_label("Keep using live system" if done else "Try Bastille live instead")
         self.back.set_visible((not busy and not done and self.idx > 0) or failed)
         self.back.set_label("Start over" if failed else "Back")
         self.next.set_visible(not busy)
@@ -1282,7 +1505,7 @@ class InstallWindow(Adw.ApplicationWindow):
             "disk": s.disk["path"], "confirm": s.disk["path"], "passphrase": s.passphrase,
             "username": s.username, "fullname": s.full, "password": s.password,
             "hostname": s.hostname, "level": s.level, "profiles": list(s.profiles),
-            "fake_duress_target": s.fake_target, "accounts": sorted(s.accounts),
+            "fake_duress_target": s.fake_target, "accounts": {k: dict(v) for k, v in s.accounts.items()},
             "apps": [a for a in APP_ALL if a in s.apps], "pins": dict(s.pins),
         }
 
@@ -1349,7 +1572,9 @@ class InstallApp(Adw.Application):
         load_css(css, CSS)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        InstallWindow(app).present()
+        win = InstallWindow(app)
+        win.present()
+        win.fullscreen()
 
 
 if __name__ == "__main__":

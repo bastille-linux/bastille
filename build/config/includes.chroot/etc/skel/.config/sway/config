@@ -58,7 +58,7 @@ exec --no-startup-id swayidle -w \
     timeout 600 'swaymsg "output * power off"' resume 'swaymsg "output * power on"' \
     before-sleep 'swaylock -f'
 
-# Live session: offer the installer. Installed system: finish first-boot setup.
+# Live session: the installer, fullscreen. Installed system: nothing to run.
 exec --no-startup-id bastille-autostart
 
 # ── Key bindings ──────────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ bindswitch lid:on exec $locker
 # ── Floating rules ────────────────────────────────────────────────────────────
 for_window [app_id="bastille-settings"]     floating enable, resize set 900 620
 for_window [app_id="org.bastilleos.Setup"]     floating enable, resize set 700 680
-for_window [app_id="org.bastilleos.Installer"] floating enable, resize set 1024 680, move position center
+for_window [app_id="org.bastilleos.Installer"] fullscreen enable
 for_window [app_id="nm-connection-editor"]  floating enable
 for_window [app_id="pavucontrol"]           floating enable, resize set 500 400
 for_window [app_id="polkit-gnome*"]         floating enable

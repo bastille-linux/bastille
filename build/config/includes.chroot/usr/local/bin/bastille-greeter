@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""bastille-greeter — Bastille OS login screen for greetd (GTK4 / libadwaita).
+
+Runs inside `cage` (see bastille-greeter-session), talks to greetd over the IPC
+socket in $GREETD_SOCK:  4-byte native-endian length + JSON, both directions.
+
+The PAM stack asks for a secret; whatever is typed goes to it unchanged, so the
+same box takes the account password or one of the duress PINs (pam_thl_duress
+decides). The greeter never learns which one it was, by design.
+"""
+
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+gi.require_version('Gdk', '4.0')
+gi.require_version('GdkPixbuf', '2.0')
+
+import json
+import os
+import pwd
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk
+
+APP_ID = "org.bastilleos.Greeter"
+SESSION_CMD = ["/usr/local/bin/bastille-session"]
+
+CSS = """
+window.greeter { background: #0b0b0b; color: #f0efec; }
+.clock { font-size: 64px; font-weight: 200; color: #f0efec; }
+.date  { font-size: 14px; color: #898781; }
+.card { background: #151515; border: 1px solid rgba(255,255,255,0.10); border-radius: 12px;
+        padding: 28px; }
+.title { font-size: 20px; font-weight: 600; }
+.host  { font-size: 12px; color: #898781; }
+.msg   { font-size: 12px; color: #898781; }
+.msg.err { color: #f47070; }
+entry.inp, passwordentry.inp, passwordentry.inp text, entry.inp text { background: #1a1a19; color: #f0efec; }
+entry.inp, passwordentry.inp { border: 1px solid rgba(255,255,255,0.10); border-radius: 8px;
+                               min-height: 40px; padding: 0 8px; box-shadow: none; }
+entry.inp:focus-within, passwordentry.inp:focus-within { border-color: #2a78d6; }
+button.btn { min-height: 40px; border-radius: 8px; background: #1a1a19; color: #f0efec;
+             border: 1px solid rgba(255,255,255,0.10); box-shadow: none; background-image: none; }
+button.btn:hover { background: #222221; }
+button.pri { background: #2a78d6; border-color: #2a78d6; color: #fff; font-weight: 600; }
+button.pri:hover { background: #3385e3; }
+button.pri:disabled { opacity: 0.55; }
+button.power { min-width: 40px; padding: 0 14px; }
+dropdown.inp button { background: #1a1a19; border: 1px solid rgba(255,255,255,0.10);
+                      border-radius: 8px; min-height: 40px; box-shadow: none; }
+"""
+
+SHIELD = "M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z"
+ICONS = {
+    "shield": SHIELD,
+    "power": "M12 3v9M6.4 6.4a8 8 0 1011.2 0",
+    "restart": "M20 12a8 8 0 11-2.3-5.7M20 4v5h-5",
+}
+
+
+def icon(name, color="#c3c2b7", size=16):
+    px = size * 4
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="{px}" height="{px}" '
+           f'fill="none" stroke="{color}" stroke-width="1.8" stroke-linecap="round" '
+           f'stroke-linejoin="round"><path d="{ICONS[name]}"/></svg>')
+    try:
+        loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
+        loader.write(svg.encode())
+        loader.close()
+        img = Gtk.Image.new_from_paintable(Gdk.Texture.new_for_pixbuf(loader.get_pixbuf()))
+        img.set_pixel_size(size)
+        return img
+    except Exception:  # noqa: BLE001  (no SVG loader: fall back to no icon)
+        return Gtk.Box()
+
+
+# ── greetd IPC ────────────────────────────────────────────────────────────────
+
+class Greetd:
+    def __init__(self, path):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(path)
+
+    def _recv(self, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = self.sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("greetd closed the connection")
+            buf += chunk
+        return buf
+
+    def request(self, **msg):
+        data = json.dumps(msg).encode()
+        self.sock.sendall(struct.pack("=I", len(data)) + data)
+        (n,) = struct.unpack("=I", self._recv(4))
+        return json.loads(self._recv(n))
+
+
+def human_users():
+    users = []
+    for p in pwd.getpwall():
+        if 1000 <= p.pw_uid < 60000 and p.pw_shell not in ("/usr/sbin/nologin", "/bin/false"):
+            users.append((p.pw_name, p.pw_gecos.split(",")[0] or p.pw_name))
+    return users
+
+
+def power(action):
+    method = {"poweroff": "PowerOff", "reboot": "Reboot"}[action]
+    subprocess.Popen(["dbus-send", "--system", "--print-reply", "--dest=org.freedesktop.login1",
+                      "/org/freedesktop/login1", f"org.freedesktop.login1.Manager.{method}",
+                      "boolean:false"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# ── UI ────────────────────────────────────────────────────────────────────────
+
+class GreeterWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app)
+        self.add_css_class("greeter")
+        self.set_default_size(1280, 800)
+        self.set_decorated(False)
+        self.users = human_users()
+        self.busy = False
+
+        overlay = Gtk.Overlay()
+        center = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, halign=Gtk.Align.CENTER,
+                         valign=Gtk.Align.CENTER)
+
+        self.clock = Gtk.Label(label="")
+        self.clock.add_css_class("clock")
+        self.date = Gtk.Label(label="")
+        self.date.add_css_class("date")
+        center.append(self.clock)
+        center.append(self.date)
+
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        card.add_css_class("card")
+        card.set_size_request(380, -1)
+        head = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, halign=Gtk.Align.CENTER)
+        head.append(icon("shield", "#2a78d6", 36))
+        t = Gtk.Label(label="Bastille OS")
+        t.add_css_class("title")
+        head.append(t)
+        try:
+            host = socket.gethostname()
+        except Exception:  # noqa: BLE001
+            host = ""
+        h = Gtk.Label(label=host)
+        h.add_css_class("host")
+        head.append(h)
+        card.append(head)
+
+        self.user_drop = None
+        if len(self.users) > 1:
+            self.user_drop = Gtk.DropDown.new_from_strings([f"{full} ({name})" for name, full in self.users])
+            self.user_drop.add_css_class("inp")
+            card.append(self.user_drop)
+        elif self.users:
+            who = Gtk.Label(label=self.users[0][1])
+            who.add_css_class("host")
+            card.append(who)
+
+        self.entry = Gtk.PasswordEntry(show_peek_icon=True, placeholder_text="Password or PIN")
+        self.entry.add_css_class("inp")
+        self.entry.connect("activate", self.on_submit)
+        self.entry.connect("changed", lambda *_: self.msg.set_text("") if not self.busy else None)
+        card.append(self.entry)
+
+        self.msg = Gtk.Label(label="", wrap=True)
+        self.msg.add_css_class("msg")
+        card.append(self.msg)
+
+        self.go = Gtk.Button(label="Sign in")
+        self.go.add_css_class("btn")
+        self.go.add_css_class("pri")
+        self.go.connect("clicked", self.on_submit)
+        card.append(self.go)
+        center.append(card)
+        overlay.set_child(center)
+
+        bar = Gtk.Box(spacing=8, halign=Gtk.Align.END, valign=Gtk.Align.END)
+        bar.set_margin_end(24)
+        bar.set_margin_bottom(24)
+        for name, tip, act in (("restart", "Restart", "reboot"), ("power", "Power off", "poweroff")):
+            b = Gtk.Button()
+            b.add_css_class("btn")
+            b.add_css_class("power")
+            b.set_child(icon(name, "#c3c2b7", 18))
+            b.set_tooltip_text(tip)
+            b.connect("clicked", lambda _b, a=act: power(a))
+            bar.append(b)
+        overlay.add_overlay(bar)
+        self.set_content(overlay)
+
+        self.tick()
+        GLib.timeout_add_seconds(1, self.tick)
+        self.entry.grab_focus()
+
+    def tick(self):
+        now = time.localtime()
+        self.clock.set_text(time.strftime("%H:%M", now))
+        self.date.set_text(time.strftime("%A, %d %B", now))
+        return True
+
+    def username(self):
+        if not self.users:
+            return ""
+        i = self.user_drop.get_selected() if self.user_drop else 0
+        return self.users[i][0]
+
+    def show(self, text, err=False):
+        self.msg.set_text(text)
+        (self.msg.add_css_class if err else self.msg.remove_css_class)("err")
+
+    def on_submit(self, *_):
+        if self.busy or not self.entry.get_text():
+            return
+        self.busy = True
+        self.go.set_sensitive(False)
+        self.entry.set_sensitive(False)
+        self.show("Signing in…")
+        secret = self.entry.get_text()
+        threading.Thread(target=self.login, args=(self.username(), secret), daemon=True).start()
+
+    def login(self, user, secret):
+        try:
+            g = Greetd(os.environ["GREETD_SOCK"])
+            resp = g.request(type="create_session", username=user)
+            while True:
+                kind = resp.get("type")
+                if kind == "auth_message":
+                    amt = resp.get("auth_message_type")
+                    if amt in ("secret", "visible"):
+                        resp = g.request(type="post_auth_message_response", response=secret)
+                    else:                       # info / error text: acknowledge
+                        resp = g.request(type="post_auth_message_response")
+                elif kind == "success":
+                    ok = g.request(type="start_session", cmd=SESSION_CMD,
+                                   env=["XDG_SESSION_TYPE=wayland", "XDG_SESSION_DESKTOP=sway"])
+                    if ok.get("type") == "success":
+                        GLib.idle_add(self.get_application().quit)
+                        return
+                    raise RuntimeError(ok.get("description", "could not start the session"))
+                else:                            # error
+                    g.request(type="cancel_session")
+                    GLib.idle_add(self.failed, "Incorrect password or PIN.")
+                    return
+        except Exception as e:  # noqa: BLE001
+            GLib.idle_add(self.failed, f"Sign-in failed: {e}")
+
+    def failed(self, text):
+        self.busy = False
+        self.entry.set_sensitive(True)
+        self.go.set_sensitive(True)
+        self.entry.set_text("")
+        self.entry.grab_focus()
+        self.show(text, err=True)
+
+
+class GreeterApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.connect("activate", self.activate)
+
+    def activate(self, app):
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        css = Gtk.CssProvider()
+        css.load_from_string(CSS) if hasattr(css, "load_from_string") else css.load_from_data(CSS.encode())
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,
+                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        win = GreeterWindow(app)
+        win.present()
+        win.fullscreen()
+
+
+if __name__ == "__main__":
+    if "GREETD_SOCK" not in os.environ:
+        print("bastille-greeter must be started by greetd (GREETD_SOCK not set)", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(GreeterApp().run([sys.argv[0]]))

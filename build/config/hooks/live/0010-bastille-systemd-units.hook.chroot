@@ -12,6 +12,7 @@ chmod +x /etc/init.d/bastille-me-neutralize      || true
 chmod +x /etc/init.d/bastille-dns-lock           || true
 chmod +x /etc/init.d/bastille-ram-scrub          || true
 chmod +x /etc/init.d/bastille-hostname           || true
+chmod +x /etc/init.d/bastille-apps-pending       || true
 chmod +x /etc/init.d/dnscrypt-proxy         || true
 chmod +x /etc/init.d/bastille-tlsdate            || true
 chmod +x /etc/init.d/bastille-tor               || true
@@ -33,6 +34,7 @@ rc-update add NetworkManager      default || true
 rc-update add seatd               boot    || true
 rc-update add dbus                default || true
 rc-update add elogind             default || true
+rc-update add bastille-apps-pending default || true
 rc-update add greetd              default || true
 rc-update add bastille-tlsdate         default || true
 rc-update add bastille-ramwipe    shutdown || true

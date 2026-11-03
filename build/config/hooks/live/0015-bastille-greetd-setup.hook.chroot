@@ -8,6 +8,11 @@ if ! id greeter >/dev/null 2>&1; then
     install -d -m 750 -o greeter -g greeter /var/lib/greeter
 fi
 
+# The greeter runs cage, which needs the GPU/input device groups (via seatd).
+for g in video input render; do
+    getent group "$g" >/dev/null && usermod -aG "$g" greeter
+done
+
 # greetd needs to read /etc/greetd/
 chmod 750 /etc/greetd
 chown root:greeter /etc/greetd

@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+# Finishes the app installation the installer could not do offline.
+# Runs at boot, does nothing unless /etc/bastille/apps.pending exists.
+
+description="Install apps the installer could not fetch offline"
+
+depend() {
+    use networking
+    after networking
+}
+
+start() {
+    [ -s /etc/bastille/apps.pending ] || return 0
+    ebegin "Installing pending Bastille apps"
+    # shellcheck disable=SC2046
+    if getent hosts deb.debian.org >/dev/null 2>&1 &&
+       apt-get update -qq && apt-get install -y --no-install-recommends $(cat /etc/bastille/apps.pending); then
+        rm -f /etc/bastille/apps.pending
+        eend 0
+    else
+        eend 0   # try again at next boot; never block it
+    fi
+}
