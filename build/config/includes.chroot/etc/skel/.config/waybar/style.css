@@ -92,7 +92,6 @@ window#waybar {
 #custom-lock:hover,
 #custom-power:hover {
     background: rgba(79, 143, 212, 0.15);
-    cursor: pointer;
 }
 
 /* Dock (bottom bar) */

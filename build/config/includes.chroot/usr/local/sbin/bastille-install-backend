@@ -493,7 +493,8 @@ class Installer:
         wanted = sorted({d for a in keep for d in APP_DEPS[a]})
         # Only what is not already in the image (the required apps' deps are baked in).
         deps = [d for d in wanted
-                if chroot("dpkg", "-s", d, check=False).returncode != 0]
+                if subprocess.run(["chroot", TARGET, "dpkg", "-s", d],
+                                  capture_output=True).returncode != 0]
         os.makedirs(f"{t}/etc/bastille", exist_ok=True)
         with open(f"{t}/etc/bastille/apps.selected", "w") as f:
             f.write("\n".join(list(REQUIRED_APPS) + chosen) + "\n")
