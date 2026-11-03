@@ -13,7 +13,7 @@ When the examiner types it in and presses Enter, bastille-dsm fires.
 Wrong PINs show "Incorrect PIN" with a constant-time delay and clear.
 Nothing distinguishes this from a real lock screen.
 
-The DSM PIN hash is read from /etc/thl/dsm.pin (argon2id, root-only).
+The DSM PIN hash is read from /etc/bastille/dsm.pin (argon2id, root-only).
 Requires: python3-gi, gir1.2-gtk-3.0, libsodium (via ctypes)
 """
 
@@ -29,7 +29,7 @@ import sys
 import time
 import threading
 
-DSM_PIN_FILE   = "/etc/thl/dsm.pin"
+DSM_PIN_FILE   = "/etc/bastille/dsm.pin"
 DSM_SCRIPT     = "/usr/local/sbin/bastille-dsm"
 WRONG_DELAY_S  = 1.2   # constant-time delay on wrong PIN
 

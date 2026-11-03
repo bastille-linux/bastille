@@ -1124,7 +1124,7 @@ class DuressPage(Page):
                 ("duress", "Duress PIN", "Wipes keys from RAM, shuts down the VPN and powers off straight away", "rd", "lock"),
                 ("fake-duress", "Fake duress PIN",
                  "Looks like a wipe: the screen goes black, then a clean-looking decoy desktop appears", "am", "prof"),
-                ("dsm", "DSM check-in PIN", "Check-in code for Device Stress Mode", "pu", "pin")]:
+                ("dsm", "DSM PIN", "The PIN you would give an examiner: a fake lock screen appears when forensic tools or brute-force attacks are detected, and entering it there triggers Device Stress Mode", "pu", "pin")]:
             e = password_entry(200)
             b = badge("Not set", "off")
             e.connect("changed", lambda *_: self._changed())
@@ -1143,8 +1143,9 @@ class DuressPage(Page):
                                             None, [self.diff_badge]))))
         self.add(section("Device Stress Mode (DSM)", Card(Row(
             "Permanent, cannot be undone",
-            "DSM overwrites the UEFI firmware and crypto-erases the NVMe. Restoring the BIOS needs a hardware "
-            "SPI programmer. Leave this off unless you know you need it.", "rd", "warn",
+            "When the DSM PIN is entered on the fake lock screen, DSM overwrites the UEFI firmware and "
+            "crypto-erases the NVMe. Restoring the BIOS needs a hardware SPI programmer. Leave this off "
+            "unless you know you need it.", "rd", "warn",
             [badge("Destructive", "crit")]), css="crit")))
 
     def on_show(self):

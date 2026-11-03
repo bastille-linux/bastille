@@ -64,6 +64,7 @@
 #define THL_DURESS_CONF     "/etc/bastille/duress.conf"
 #define THL_DURESS_LOG_TAG  "bastille-duress"
 #define MAX_LINE            512
+#define MAX_PIN_COPY        256
 #define MAX_PINS            16
 #define MAX_HASH_LEN        256
 #define MAX_ACTION_LEN      64
@@ -113,12 +114,15 @@ static action_type_t parse_action(const char *s)
 
 /*
  * Verify that the config file is owned by root and not world-readable.
- * Returns 0 on success, -1 on failure.
+ * Returns 0 on success, 1 if the file does not exist (duress PINs are simply not
+ * configured: not an error), -1 on failure.
  */
 static int check_config_perms(const char *path)
 {
     struct stat st;
     if (stat(path, &st) != 0) {
+        if (errno == ENOENT)
+            return 1;
         syslog(LOG_AUTH | LOG_ERR,
                THL_DURESS_LOG_TAG ": cannot stat %s: %s", path, strerror(errno));
         return -1;
@@ -136,11 +140,15 @@ static int check_config_perms(const char *path)
     return 0;
 }
 
+/* Returns 0 loaded, 1 not configured (no file / no entries), -1 error. */
 static int load_config(pin_config_t *cfg)
 {
     cfg->count = 0;
 
-    if (check_config_perms(THL_DURESS_CONF) != 0)
+    int pr = check_config_perms(THL_DURESS_CONF);
+    if (pr == 1)
+        return 1;
+    if (pr != 0)
         return -1;
 
     FILE *f = fopen(THL_DURESS_CONF, "r");
@@ -196,7 +204,7 @@ static int load_config(pin_config_t *cfg)
     }
 
     fclose(f);
-    return cfg->count > 0 ? 0 : -1;
+    return cfg->count > 0 ? 0 : 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -275,7 +283,7 @@ static void execute_duress_action(pam_handle_t *pamh,
                THL_DURESS_LOG_TAG ": DURESS DECOY triggered by user '%s' -> profile '%s'",
                user ? user : "unknown",
                e->action_arg[0] ? e->action_arg : "decoy");
-        run_action_detached("/usr/local/bin/bastille-profile-switch",
+        run_action_detached("/etc/bastille/actions/decoy-switch.sh",
                             e->action_arg[0] ? e->action_arg : "decoy");
         break;
 
@@ -341,7 +349,10 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
 
     /* Load config */
     pin_config_t cfg;
-    if (load_config(&cfg) != 0) {
+    int lc = load_config(&cfg);
+    if (lc == 1)
+        return PAM_IGNORE;      /* no duress PINs configured: let the next module decide */
+    if (lc != 0) {
         syslog(LOG_AUTH | LOG_ERR,
                THL_DURESS_LOG_TAG ": failed to load config — denying");
         return PAM_AUTH_ERR;
@@ -354,11 +365,19 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
         return PAM_AUTH_ERR;
     }
 
-    /* Verify against all entries (constant-time over all entries) */
-    int idx = verify_pin(&cfg, pin);
-
-    /* Zero the PIN from memory immediately after verification */
-    sodium_memzero((void *)pin, strlen(pin));
+    /* Verify against all entries (constant-time over all entries).
+     *
+     * Work on a private copy and wipe only that. `pin` points into memory owned by
+     * PAM: it is the stored PAM_AUTHTOK that pam_unix reuses for the real password
+     * check, so zeroing it here would turn every account password into "". */
+    char pinbuf[MAX_PIN_COPY];
+    size_t pinlen = strlen(pin);
+    if (pinlen >= sizeof(pinbuf))
+        pinlen = sizeof(pinbuf) - 1;
+    memcpy(pinbuf, pin, pinlen);
+    pinbuf[pinlen] = '\0';
+    int idx = verify_pin(&cfg, pinbuf);
+    sodium_memzero(pinbuf, sizeof(pinbuf));
 
     if (idx < 0) {
         /* No match — add a small fixed delay to rate-limit brute force */

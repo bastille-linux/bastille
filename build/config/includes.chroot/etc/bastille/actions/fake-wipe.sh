@@ -20,7 +20,7 @@
 set -euo pipefail
 
 DECOY_PROFILE="${THL_DECOY_PROFILE:-decoy}"
-LOCK_CMD="/usr/local/sbin/thl-lock"
+LOCK_CMD="/usr/local/sbin/bastille-lock"
 
 # Close the real profile silently
 bastille-profile lock 2>/dev/null || true

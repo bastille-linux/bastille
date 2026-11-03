@@ -259,15 +259,15 @@ class SecurityPinsPage(Gtk.ScrolledWindow):
         # DSM — Device Stress Mode
         dm = Adw.PreferencesGroup()
         dm.set_title("DSM — Device Stress Mode")
-        dm.set_description("Automatically triggers duress wipe if a check-in PIN is not entered "
-                           "within the configured interval. Designed for covert operations or custody scenarios.")
-        r_en = BastilleRow("Enable DSM", "Requires check-in at interval", "appointment-soon-symbolic",
+        dm.set_description("Watches for forensic tools and brute-force attacks. When one is detected a fake "
+                           "lock screen appears; entering the DSM PIN on it triggers Device Stress Mode.")
+        r_en = BastilleRow("Enable DSM", "Watchdog and fake lock screen", "appointment-soon-symbolic",
                            toggle=True, toggle_active=file_exists("/etc/bastille/dsm.enabled"),
                            on_toggle=self._toggle_dsm)
         dm.add(r_en)
         r_pin = Adw.ActionRow()
         r_pin.set_title("DSM check-in PIN")
-        r_pin.set_subtitle("Enter this periodically to check in")
+        r_pin.set_subtitle("The PIN you would give an examiner")
         btn3 = Gtk.Button.new_with_label("Set PIN")
         btn3.set_valign(Gtk.Align.CENTER)
         btn3.add_css_class("pill")

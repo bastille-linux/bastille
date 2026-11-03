@@ -33,12 +33,9 @@ account required    pam_unix.so
 session required    pam_unix.so
 EOF
 
-# su inherits common-auth; patch it to include pam_thl_duress
-cat > /etc/pam.d/common-auth << 'EOF'
-auth    sufficient  pam_thl_duress.so
-auth    [success=1 default=ignore]  pam_unix.so nullok
-auth    requisite   pam_deny.so
-auth    required    pam_permit.so
-EOF
+# NOTE: pam_thl_duress is deliberately NOT added to common-auth. That file feeds every
+# service (polkit prompts, sshd, su, ...): a duress PIN typed into the wrong prompt must
+# never fire a wipe, and polkit dialogs would show an extra "PIN:" prompt. It is only
+# in the sign-in (greetd) and lock-screen (swaylock) stacks above.
 
 echo "PAM duress config installed."

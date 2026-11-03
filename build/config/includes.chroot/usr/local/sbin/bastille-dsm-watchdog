@@ -8,10 +8,10 @@
 # On trigger: launches bastille-dsm-prompt as a fullscreen fake lock screen.
 # Only one prompt runs at a time.
 #
-# Reads /etc/thl/dsm.enabled — exits immediately if DSM is not activated.
+# Reads /etc/bastille/dsm.enabled — exits immediately if DSM is not activated.
 
-DSM_ENABLED_FILE="/etc/thl/dsm.enabled"
-DSM_PIN_FILE="/etc/thl/dsm.pin"
+DSM_ENABLED_FILE="/etc/bastille/dsm.enabled"
+DSM_PIN_FILE="/etc/bastille/dsm.pin"
 DSM_PROMPT="/usr/local/sbin/bastille-dsm-prompt"
 PROMPT_PID_FILE="/run/thl/dsm-prompt.pid"
 
