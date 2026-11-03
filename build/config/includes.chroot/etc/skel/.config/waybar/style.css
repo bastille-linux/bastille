@@ -1,7 +1,7 @@
 /* Bastille OS — Waybar theme */
 
 * {
-    font-family: "IBM Plex Sans", "DejaVu Sans", sans-serif;
+    font-family: "Inter", "Noto Sans", "FontAwesome", sans-serif;
     font-size: 13px;
     min-height: 0;
     border: none;

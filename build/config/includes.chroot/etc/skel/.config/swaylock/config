@@ -16,7 +16,7 @@ inside-ver-color=1c4a8aff
 inside-wrong-color=3a1a1aff
 inside-clear-color=161b22ff
 
-font=IBM Plex Mono
+font=Noto Sans Mono
 font-size=16
 
 indicator-radius=80
@@ -31,5 +31,3 @@ clock
 timestr=%H:%M
 datestr=%A, %d %B %Y
 
-image=/etc/bastille/wallpaper.png
-scaling=fill

@@ -143,6 +143,7 @@ fonts-font-awesome
 # wizard at first boot when the user selects those apps.
 gir1.2-adw-1
 gir1.2-gtk-4.0
+gir1.2-vte-3.91
 libadwaita-1-0
 
 # UI extras

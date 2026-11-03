@@ -54,6 +54,12 @@ fi
 # Add user to proc group so it can still read its own /proc entries
 grep -q '^proc:' /etc/group || groupadd -r proc
 usermod -aG proc user || true
+# /proc is mounted hidepid=2,gid=proc: polkitd (its own user) must be in that group
+# or it cannot read /proc/<pid>/{stat,status} of the process asking for authorization
+# and rejects every pkexec / polkit-agent request.
+for u in polkitd; do
+    getent passwd "$u" >/dev/null && usermod -aG proc "$u"
+done
 
 # Disable core dumps via limits.conf
 cat >> /etc/security/limits.conf << 'EOF'

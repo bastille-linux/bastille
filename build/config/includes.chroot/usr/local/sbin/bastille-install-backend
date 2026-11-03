@@ -47,7 +47,8 @@ ESP_MIB = 512
 BOOT_MIB = 1024
 
 GRUB_TARGETS = {"aarch64": "arm64-efi", "x86_64": "x86_64-efi"}
-USER_GROUPS = ["video", "input", "audio", "render", "tty", "seat", "_seatd",
+# proc: exempt from /proc hidepid, which libsystemd (polkit, logind clients) needs.
+USER_GROUPS = ["proc", "video", "input", "audio", "render", "tty", "seat", "_seatd",
                "plugdev", "netdev", "cdrom", "floppy", "dialout"]
 
 USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,30}$")
@@ -77,7 +78,9 @@ PROFILE_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 
 # Optional apps (the Settings app is always kept). Maps to extra Debian
 # packages the app needs beyond the GTK4 runtime already in the image.
+REQUIRED_APPS = ("settings", "files", "browser", "terminal")   # preinstalled, never removed
 APP_DEPS = {
+    "settings": [],
     "browser": ["tor"],
     "mail": ["gir1.2-soup-3.0"],
     "messages": [],
@@ -92,6 +95,28 @@ APP_DEPS = {
     "music": ["gir1.2-gst-1.0", "gstreamer1.0-plugins-good", "python3-mutagen"],
     "weather": ["gir1.2-soup-3.0"],
 }
+
+
+MAIL_PROVIDERS = {
+    "gmail.com": ("imap.gmail.com", "smtp.gmail.com"),
+    "googlemail.com": ("imap.gmail.com", "smtp.gmail.com"),
+    "outlook.com": ("outlook.office365.com", "smtp-mail.outlook.com"),
+    "hotmail.com": ("outlook.office365.com", "smtp-mail.outlook.com"),
+    "live.com": ("outlook.office365.com", "smtp-mail.outlook.com"),
+    "yahoo.com": ("imap.mail.yahoo.com", "smtp.mail.yahoo.com"),
+    "icloud.com": ("imap.mail.me.com", "smtp.mail.me.com"),
+    "me.com": ("imap.mail.me.com", "smtp.mail.me.com"),
+    "fastmail.com": ("imap.fastmail.com", "smtp.fastmail.com"),
+    "gmx.com": ("imap.gmx.com", "mail.gmx.com"),
+    "gmx.net": ("imap.gmx.net", "mail.gmx.net"),
+    "mail.com": ("imap.mail.com", "smtp.mail.com"),
+}
+
+
+def mail_servers(address):
+    """IMAP/SMTP host guess from the address: known providers, else imap./smtp.<domain>."""
+    domain = address.rsplit("@", 1)[-1].lower()
+    return MAIL_PROVIDERS.get(domain, (f"imap.{domain}", f"smtp.{domain}"))
 
 
 def emit(**ev):
@@ -251,7 +276,7 @@ class Installer:
                 if k != "config" and ("\n" in v or "\r" in v):
                     raise InstallError(f"bad value for {a}.{k}")
         for a in c.get("apps", []):
-            if a not in APP_DEPS:
+            if a not in APP_DEPS or a in REQUIRED_APPS:
                 raise InstallError(f"unknown app: {a!r}")
         for t, pin in c.get("pins", {}).items():
             if t not in PIN_TYPES:
@@ -447,16 +472,17 @@ class Installer:
         return p.returncode == 0
 
     def apps(self):
-        """Keep the selected optional apps; install their extra dependencies.
+        """Keep the required + selected apps; install any extra dependencies still missing.
 
-        The app launchers ship in the image. Unselected ones are removed from
-        the target. Their dependencies are fetched with apt, which needs a
-        network: if there is none, the list is left for the bastille-apps-pending boot service.
+        The app launchers ship in the image. Unselected optional ones are removed from
+        the target. Missing dependencies are fetched with apt, which needs a network:
+        if there is none, the list is left for the bastille-apps-pending boot service.
         """
         t = TARGET
         chosen = [a for a in self.cfg.get("apps", []) if a in APP_DEPS]
+        keep = set(REQUIRED_APPS) | set(chosen)
         for app in APP_DEPS:
-            if app in chosen:
+            if app in keep:
                 continue
             for p in (f"usr/local/bin/bastille-{app}",
                       f"usr/share/applications/bastille-{app}.desktop"):
@@ -464,10 +490,13 @@ class Installer:
                     os.unlink(f"{t}/{p}")
                 except FileNotFoundError:
                     pass
-        deps = sorted({d for a in chosen for d in APP_DEPS[a]})
+        wanted = sorted({d for a in keep for d in APP_DEPS[a]})
+        # Only what is not already in the image (the required apps' deps are baked in).
+        deps = [d for d in wanted
+                if chroot("dpkg", "-s", d, check=False).returncode != 0]
         os.makedirs(f"{t}/etc/bastille", exist_ok=True)
         with open(f"{t}/etc/bastille/apps.selected", "w") as f:
-            f.write("\n".join(["settings"] + chosen) + "\n")
+            f.write("\n".join(list(REQUIRED_APPS) + chosen) + "\n")
         self.apps_pending = []
         if not deps:
             log("no extra packages needed")
@@ -515,12 +544,13 @@ class Installer:
         mail = []
         if "email" in accts:
             e = accts["email"]
+            imap_host, smtp_host = mail_servers(e["address"])
             mail.append({"type": "email", "address": e["address"],
-                         "imap": {"host": e["imap_host"], "port": 993},
-                         "smtp": {"host": e["smtp_host"], "port": 587}})
-            rc = (f"defaults\\nauth on\\ntls on\\ntls_trust_file /etc/ssl/certs/ca-certificates.crt\\n\\n"
-                  f"account default\\nhost {e['smtp_host']}\\nport 587\\ntls_starttls on\\n"
-                  f"from {e['address']}\\nuser {e['address']}\\npassword {e['password']}\\n")
+                         "imap": {"host": imap_host, "port": 993},
+                         "smtp": {"host": smtp_host, "port": 587}})
+            rc = (f"defaults\nauth on\ntls on\ntls_trust_file /etc/ssl/certs/ca-certificates.crt\n\n"
+                  f"account default\nhost {smtp_host}\nport 587\ntls_starttls on\n"
+                  f"from {e['address']}\nuser {e['address']}\npassword {e['password']}\n")
             with open(f"{home}/.msmtprc", "w") as f:
                 f.write(rc)
             os.chmod(f"{home}/.msmtprc", 0o600)
@@ -536,7 +566,10 @@ class Installer:
         if "signal" in accts:
             msgs["signal"] = {"number": accts["signal"]["number"].replace(" ", ""), "verified": False}
         if "session" in accts:
-            msgs["session"] = {"name": accts["session"].get("name", ""), "created": False}
+            sess = accts["session"]
+            msgs["session"] = {"name": sess.get("name", ""),
+                               "recovery_phrase": sess.get("recovery", ""),
+                               "restore": bool(sess.get("recovery")), "created": False}
         if msgs:
             os.makedirs(msg_dir, exist_ok=True)
             with open(f"{msg_dir}/accounts.json", "w") as f:
@@ -546,7 +579,7 @@ class Installer:
         if "wireguard" in accts:
             os.makedirs(f"{t}/etc/wireguard", mode=0o700, exist_ok=True)
             with open(f"{t}/etc/wireguard/wg0.conf", "w") as f:
-                f.write(accts["wireguard"]["config"].rstrip() + "\\n")
+                f.write(accts["wireguard"]["config"].rstrip() + "\n")
             os.chmod(f"{t}/etc/wireguard/wg0.conf", 0o600)
             log("WireGuard configuration installed")
 
@@ -563,7 +596,7 @@ class Installer:
             r = chroot("runuser", "-u", user, "--", "env", f"HOME=/home/{user}",
                        "gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0",
                        "--quick-generate-key", uid, "default", "default", "2y",
-                       input=p["passphrase"] + "\\n", check=False)
+                       input=p["passphrase"] + "\n", check=False)
             log("PGP key generated" if r.returncode == 0 else "PGP key generation failed")
 
     def personalise(self):

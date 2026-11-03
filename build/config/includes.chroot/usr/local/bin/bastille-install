@@ -368,37 +368,43 @@ LEVEL_NAME = {k: n for k, n, *_ in LEVELS}
 
 ACCOUNT_GROUPS = [
     ("Email & encryption", [
-        ("email", "Email", "Connect an existing inbox over IMAP and SMTP · used by the Mail app", "bl", "mail"),
+        ("email", "Email", "Connect an existing inbox with your address and password · used by the Mail app", "bl", "mail"),
         ("guerrilla", "Guerrilla Mail address", "A disposable address for sign-ups, no personal details needed", "am", "spark"),
         ("pgp", "PGP key", "Create a new key pair for signing and encrypting mail and messages", "gn", "key")]),
     ("Messaging", [
         ("signal", "Signal", "Link or register a number · used by the Messages app", "bl", "msg"),
-        ("session", "Session", "Create an identity with no phone number · used by the Messages app", "gn", "msg2")]),
+        ("session", "Session", "Create an identity with no phone number, or restore one with your recovery phrase", "gn", "msg2")]),
     ("Network", [
         ("wireguard", "WireGuard VPN", "Import a .conf file from your provider", "pu", "vpn")]),
 ]
 ACCOUNT_NAME = {k: n for _, items in ACCOUNT_GROUPS for k, n, *_ in items}
 
+# Preinstalled and not removable.
+REQUIRED_APPS = [
+    ("settings", "Settings", "Panel for configuring system hardening", "gn", "chip"),
+    ("files", "Files", "File manager showing age/GPG encryption badges", "gn", "folder"),
+    ("browser", "Browser", "Privacy browser combining Tor and Zen", "pu", "globe"),
+    ("terminal", "Terminal", "Multi-tab terminal based on VTE", "gn", "term"),
+]
 APP_GROUPS = [
     ("Privacy & communication", [
-        ("browser", "Browser", "Privacy browser combining Tor and Zen", "pu", "globe"),
         ("mail", "Mail", "Encrypted mail with disposable Guerrilla Mail addresses and PGP", "bl", "mail"),
         ("messages", "Messages", "Messaging hub for Signal, Session, and GPG", "bl", "msg"),
         ("calendar", "Calendar", "Offline calendar that detects events from Mail and Messages", "am", "cal")]),
     ("Files & office", [
-        ("files", "Files", "File manager showing age/GPG encryption badges", "gn", "folder"),
         ("notes", "Notes", "Encrypted notes with PIN lock and Markdown preview", "gn", "notes"),
         ("documents", "Documents", "Launcher for LibreOffice Writer with age decryption", "bl", "doc"),
         ("sheets", "Sheets", "Launcher for LibreOffice Calc", "gn", "table"),
         ("presentations", "Presentations", "Launcher for LibreOffice Impress", "am", "slides")]),
     ("Tools & media", [
-        ("terminal", "Terminal", "Multi-tab terminal based on VTE", "gn", "term"),
         ("maps", "Maps", "Offline maps viewer", "bl", "map"),
         ("music", "Music", "Local music player built on GStreamer", "pu", "music"),
         ("weather", "Weather", "Weather app using wttr.in with a privacy focus", "am", "cloud")]),
 ]
-APP_ALL = [a for _, items in APP_GROUPS for a, *_ in items]
-APP_NAME = {a: n for _, items in APP_GROUPS for a, n, *_ in items}
+APP_ALL = [a for _, items in APP_GROUPS for a, *_ in items]                # optional
+APP_NAME = {a: n for a, n, *_ in REQUIRED_APPS}
+APP_NAME.update({a: n for _, items in APP_GROUPS for a, n, *_ in items})
+REQUIRED_NAMES = ", ".join(n for _, n, *_ in REQUIRED_APPS)
 
 NAV = [("Start", [("Welcome", "shield")]),
        ("Disk", [("Disk", "disk"), ("Encryption", "lock")]),
@@ -541,7 +547,10 @@ class DiskPage(Page):
         elif d["too_small"]:
             badges, usable = [badge("Smaller than 8 GB", "warn")], False
         self._radio_by_path[d["path"]] = radio
-        row = Row(d["model"], desc, "bl" if not d["removable"] else "am",
+        model = d["model"]
+        if re.match(r"^0x[0-9a-fA-F]+$", model) or model == "Unknown":
+            model = "Virtual disk" if d.get("transport") in ("", "virtio") else "Disk"
+        row = Row(model, desc, "bl" if not d["removable"] else "am",
                   "ssd" if not d["removable"] else "stick",
                   badges + ([radio] if usable else [radio]), mono_desc=True)
         if not usable:
@@ -757,9 +766,38 @@ class ProfilesPage(Page):
                              [badge("Fake duress target", "warn")])
         self.extra_card = Card(self.main_row, self.decoy_row)
         add_btn = button("Add", small=True)
-        add_btn.connect("clicked", lambda *_: self._add_dialog())
+        add_btn.connect("clicked", lambda *_: self._open_form())
         self.add_row = Row("Add a profile", "For example work, travel or research", None, "plus", [add_btn])
         self.extra_card.append(self.add_row)
+        # Inline form, same look as the account forms (no popup dialog).
+        self.name_entry = text_entry("", 320)
+        self.name_entry.set_placeholder_text("work")
+        self.name_entry.connect("activate", lambda *_: self._save_profile())
+        line = Gtk.Box(spacing=12)
+        lbl = label("Profile name", "row-label")
+        lbl.set_size_request(170, -1)
+        line.append(lbl)
+        line.append(self.name_entry)
+        self.form_err = label("", "form-error", wrap=True)
+        self.form_err.set_visible(False)
+        save, cancel = button("Add profile", "pri", small=True), button("Cancel", small=True)
+        save.connect("clicked", lambda *_: self._save_profile())
+        cancel.connect("clicked", lambda *_: self._close_form())
+        btns = Gtk.Box(spacing=8, halign=Gtk.Align.END)
+        btns.append(cancel)
+        btns.append(save)
+        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        form.add_css_class("formbox")
+        for w in (line, label("Letters, digits, - and _ only.", "row-desc"), self.form_err, btns):
+            form.append(w)
+        self.form_rev = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN, child=form)
+        self.form_wrap = Gtk.Box()
+        self.form_wrap.add_css_class("brow")
+        self.form_wrap.add_css_class("formrow")
+        self.form_rev.set_hexpand(True)
+        self.form_wrap.append(self.form_rev)
+        self.form_wrap.set_visible(False)
+        self.extra_card.append(self.form_wrap)
         self.add(section("Profiles on this computer", self.extra_card))
         self._extra_rows = []
         self._pick(self.st.level)
@@ -779,31 +817,36 @@ class ProfilesPage(Page):
         self.main_row.set_desc(f"{s.full or s.username} · {s.username} · your everyday desktop")
         self._pick(s.level)
 
-    def _add_dialog(self):
-        dlg = Adw.MessageDialog.new(self.wiz, "Add a profile")
-        dlg.set_body("Letters, digits, - and _ only.")
-        entry = Gtk.Entry(placeholder_text="work")
-        dlg.set_extra_child(entry)
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("add", "Add")
-        dlg.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
-        dlg.set_default_response("add")
-        entry.connect("activate", lambda *_: dlg.response("add"))
+    def _open_form(self):
+        self.name_entry.set_text("")
+        self.form_err.set_visible(False)
+        self.form_wrap.set_visible(True)
+        self.form_rev.set_reveal_child(True)
+        self.name_entry.grab_focus()
 
-        def done(d, resp):
-            name = entry.get_text().strip()
-            if resp == "add" and re.match(r"^[a-zA-Z0-9_-]{1,32}$", name) \
-                    and name.lower() not in ("main", "decoy") and name not in self.st.profiles:
-                self.st.profiles.append(name)
-                self._refresh_extra()
-        dlg.connect("response", done)
-        dlg.present()
+    def _close_form(self):
+        self.form_rev.set_reveal_child(False)
+        self.form_wrap.set_visible(False)
+
+    def _save_profile(self):
+        name = self.name_entry.get_text().strip()
+        if not re.match(r"^[a-zA-Z0-9_-]{1,32}$", name):
+            self.form_err.set_text("Use letters, digits, '-' and '_' only (up to 32 characters).")
+            self.form_err.set_visible(True)
+        elif name.lower() in ("main", "decoy") or name in self.st.profiles:
+            self.form_err.set_text("That profile name is already used.")
+            self.form_err.set_visible(True)
+        else:
+            self.st.profiles.append(name)
+            self._close_form()
+            self._refresh_extra()
 
     def _refresh_extra(self):
         for r in self._extra_rows:
             self.extra_card.remove(r)
         self._extra_rows = []
         self.extra_card.remove(self.add_row)
+        self.extra_card.remove(self.form_wrap)
         for name in self.st.profiles:
             rm = button("Remove", small=True)
             row = Row(name, "Its own encrypted home, keyring and browser profile", None, "prof", [rm])
@@ -811,21 +854,21 @@ class ProfilesPage(Page):
             self.extra_card.append(row)
             self._extra_rows.append(row)
         self.extra_card.append(self.add_row)
+        self.extra_card.append(self.form_wrap)
 
 
 ACCOUNT_FIELDS = {
     # key: [(field, label, placeholder, secret)]
     "email": [("address", "Email address", "you@example.com", False),
-              ("password", "Password", "", True),
-              ("imap_host", "IMAP server", "imap.example.com", False),
-              ("smtp_host", "SMTP server", "smtp.example.com", False)],
+              ("password", "Password", "", True)],
     "guerrilla": [("name", "Address name (optional)", "leave empty for a random one", False)],
     "pgp": [("name", "Full name", "", False),
             ("email", "Email address", "you@example.com", False),
             ("passphrase", "Key passphrase", "", True),
             ("passphrase2", "Confirm passphrase", "", True)],
     "signal": [("number", "Phone number", "+370 600 00000", False)],
-    "session": [("name", "Display name (optional)", "", False)],
+    "session": [("name", "Display name (optional)", "", False),
+                ("recovery", "Recovery phrase (optional)", "13 words — leave empty to create a new identity", True)],
     "wireguard": [],
 }
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -839,9 +882,6 @@ def validate_account(key, d):
             return "Enter a valid email address."
         if not d.get("password"):
             return "Enter the mailbox password."
-        for f in ("imap_host", "smtp_host"):
-            if not _HOST_RE.match(d.get(f, "")):
-                return "Enter the IMAP and SMTP server names."
     elif key == "guerrilla":
         if d.get("name") and not re.match(r"^[a-z0-9._-]{1,40}$", d["name"]):
             return "Use lowercase letters, digits, '.', '-' and '_' only."
@@ -860,6 +900,9 @@ def validate_account(key, d):
     elif key == "session":
         if len(d.get("name", "")) > 40:
             return "The display name is too long."
+        words = d.get("recovery", "").split()
+        if words and len(words) != 13:
+            return "A Session recovery phrase is 13 words."
     elif key == "wireguard":
         cfg = d.get("config", "")
         if "[Interface]" not in cfg or "PrivateKey" not in cfg or "[Peer]" not in cfg:
@@ -951,7 +994,7 @@ class AccountsPage(Page):
 
     def _collect(self, key):
         r = self._rows[key]
-        d = {n: e.get_text().strip() if n not in ("password", "passphrase", "passphrase2")
+        d = {n: e.get_text().strip() if n not in ("password", "passphrase", "passphrase2", "recovery")
              else e.get_text() for n, e in r["fields"].items()}
         if r["tv"] is not None:
             buf = r["tv"].get_buffer()
@@ -1035,8 +1078,9 @@ class AppsPage(Page):
             "github.com/bastille-linux/apps",
             "GTK4 native apps for Bastille OS · each installs to /usr/local/bin/bastille-<name>",
             "bl", "apps", [clear, sel], mono_desc=True))))
-        self.add(section("Always installed", Card(Row(
-            "Settings", "Panel for configuring system hardening", "gn", "chip", [badge("Included", "ok")]))))
+        self.add(section("Always installed", Card(*[
+            Row(name, desc, tone, ic, [badge("Included", "ok")])
+            for _, name, desc, tone, ic in REQUIRED_APPS])))
         self._btns = {}
         for title, items in APP_GROUPS:
             rows = []
@@ -1054,10 +1098,10 @@ class AppsPage(Page):
             b.set_label("✓ Installed" if on else "Install")
             (b.add_css_class if on else b.remove_css_class)("btn-ok")
         n = len(self.st.apps)
-        self.sub_lbl.set_text("Only Settings will be installed. Pick any of the 13 optional apps below."
+        self.sub_lbl.set_text(f"Only {REQUIRED_NAMES} will be installed. Pick any of the {len(APP_ALL)} optional apps below."
                               if n == 0 else
-                              f"{n} optional app{'s' if n != 1 else ''} will be installed with Settings.")
-        self.wiz.hint_override = f"{n} of 13 optional apps selected · change later in Settings → Installed Apps"
+                              f"{n} optional app{'s' if n != 1 else ''} will be installed with {REQUIRED_NAMES}.")
+        self.wiz.hint_override = f"{n} of {len(APP_ALL)} optional apps selected · change later in Settings → Installed Apps"
         self.changed()
 
     def on_show(self):
@@ -1080,7 +1124,7 @@ class DuressPage(Page):
                 ("duress", "Duress PIN", "Wipes keys from RAM, shuts down the VPN and powers off straight away", "rd", "lock"),
                 ("fake-duress", "Fake duress PIN",
                  "Looks like a wipe: the screen goes black, then a clean-looking decoy desktop appears", "am", "prof"),
-                ("dsm", "DSM check-in PIN", "Check-in code for dead-switch mode", "pu", "pin")]:
+                ("dsm", "DSM check-in PIN", "Check-in code for Device Stress Mode", "pu", "pin")]:
             e = password_entry(200)
             b = badge("Not set", "off")
             e.connect("changed", lambda *_: self._changed())
@@ -1097,7 +1141,7 @@ class DuressPage(Page):
         self.add(section("Checks", Card(Row("At least 4 digits", None, None, None, [self.len_badge]),
                                         Row("Different from each other and from your login password", None, None,
                                             None, [self.diff_badge]))))
-        self.add(section("Dead-switch mode (DSM)", Card(Row(
+        self.add(section("Device Stress Mode (DSM)", Card(Row(
             "Permanent, cannot be undone",
             "DSM overwrites the UEFI firmware and crypto-erases the NVMe. Restoring the BIOS needs a hardware "
             "SPI programmer. Leave this off unless you know you need it.", "rd", "warn",
@@ -1178,9 +1222,9 @@ class ReviewPage(Page):
             ("Duress PINs", (" and ".join(pins) + " set" if pins else "None set")
              + (" · DSM on" if "dsm" in s.pins else " · DSM off"),
              [badge(f"{len(s.pins)} PIN{'s' if len(s.pins) != 1 else ''}", "warn" if s.pins else "off")]),
-            ("Apps", "Settings" + "".join(f", {APP_NAME[a]}" for a in APP_ALL if a in s.apps)
+            ("Apps", REQUIRED_NAMES + "".join(f", {APP_NAME[a]}" for a in APP_ALL if a in s.apps)
              + (" from bastille-linux/apps" if np_ else ""),
-             [badge(f"{np_ + 1} app{'s' if np_ else ''}", "ok")]),
+             [badge(f"{np_ + len(REQUIRED_APPS)} apps", "ok")]),
         ]
         for t, desc, suffix in rows:
             self.plan.append(Row(t, desc, None, None, suffix))
@@ -1316,9 +1360,9 @@ class DonePage(Page):
                       "change any of it later in Settings")]:
             self.next_card.append(Row(t, d))
         self.setup_card.clear()
-        n_apps = len(s.apps) + 1
-        self.setup_card.append(Row(f"{n_apps} app{'s' if n_apps != 1 else ''}",
-                                   "Settings" + "".join(f", {APP_NAME[a]}" for a in APP_ALL if a in s.apps)
+        n_apps = len(s.apps) + len(REQUIRED_APPS)
+        self.setup_card.append(Row(f"{n_apps} apps",
+                                   REQUIRED_NAMES + "".join(f", {APP_NAME[a]}" for a in APP_ALL if a in s.apps)
                                    + " · add more any time in Settings → Installed Apps",
                                    "gn", "apps", [badge("Installed", "ok")]))
         self.setup_card.append(Row(f"{2 + len(s.profiles)} profiles",

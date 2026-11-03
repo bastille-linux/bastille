@@ -238,7 +238,7 @@ class PinsPage(Adw.NavigationPage):
         for label, desc, attr in [
             ("Duress PIN", "Triggers RAM wipe + immediate poweroff", "_duress"),
             ("Fake Duress PIN", "Decoy wipe — boots to sanitised session", "_fake_duress"),
-            ("DSM Check-in PIN", "Dead switch mode check-in code", "_dsm"),
+            ("DSM Check-in PIN", "Device Stress Mode check-in code", "_dsm"),
         ]:
             row = Adw.PasswordEntryRow()
             row.set_title(label)

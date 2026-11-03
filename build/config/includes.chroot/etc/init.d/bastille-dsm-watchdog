@@ -1,5 +1,5 @@
 #!/sbin/openrc-run
-# Bastille DSM (Dead Switch Mode) attack watchdog
+# Bastille DSM (Device Stress Mode) watchdog
 
 description="Bastille DSM attack watchdog"
 pidfile="/run/bastille-dsm-watchdog.pid"

@@ -7,7 +7,9 @@ set -euo pipefail
 # Instead, add 'user' directly to the group file now; live-boot preserves it.
 python3 - << 'PYEOF'
 import sys
-groups_to_join = ['seat', 'video', 'input', 'audio', 'render', 'tty']
+# 'proc' is the hidepid exemption group: without it libsystemd cannot read /proc/1/cgroup,
+# so polkit and every logind client fail with "No session for pid".
+groups_to_join = ['seat', 'video', 'input', 'audio', 'render', 'tty', 'proc']
 live_user = 'user'
 with open('/etc/group', 'r') as f:
     lines = f.readlines()

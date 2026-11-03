@@ -256,9 +256,9 @@ class SecurityPinsPage(Gtk.ScrolledWindow):
         fg.add(r2)
         box.append(fg)
 
-        # DSM — Dead Switch Mode
+        # DSM — Device Stress Mode
         dm = Adw.PreferencesGroup()
-        dm.set_title("DSM — Dead Switch Mode")
+        dm.set_title("DSM — Device Stress Mode")
         dm.set_description("Automatically triggers duress wipe if a check-in PIN is not entered "
                            "within the configured interval. Designed for covert operations or custody scenarios.")
         r_en = BastilleRow("Enable DSM", "Requires check-in at interval", "appointment-soon-symbolic",
@@ -267,7 +267,7 @@ class SecurityPinsPage(Gtk.ScrolledWindow):
         dm.add(r_en)
         r_pin = Adw.ActionRow()
         r_pin.set_title("DSM check-in PIN")
-        r_pin.set_subtitle("Enter this periodically to suppress the dead switch")
+        r_pin.set_subtitle("Enter this periodically to check in")
         btn3 = Gtk.Button.new_with_label("Set PIN")
         btn3.set_valign(Gtk.Align.CENTER)
         btn3.add_css_class("pill")
