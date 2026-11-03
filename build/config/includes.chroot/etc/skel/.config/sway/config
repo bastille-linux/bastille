@@ -3,9 +3,9 @@
 
 # ── Variables ─────────────────────────────────────────────────────────────────
 set $mod Mod4
-set $term alacritty
+set $term foot
 set $launcher bastille-launcher
-set $locker swaylock
+set $locker swaylock -f
 
 # Bastille colours
 set $bg          #0b0c10
@@ -16,8 +16,6 @@ set $text        #c9d1d9
 set $urgent      #f85149
 
 # ── Output / wallpaper ────────────────────────────────────────────────────────
-output * bg /etc/bastille/wallpaper.png fill
-# Fallback solid colour
 output * bg #0b0c10 solid_color
 
 # ── Input ─────────────────────────────────────────────────────────────────────
@@ -39,7 +37,7 @@ default_border pixel 1
 default_floating_border pixel 1
 smart_gaps on
 smart_borders on
-font pango:IBM Plex Sans 10
+font pango:Noto Sans 10
 
 # Window colours:        border    bg        text      indicator child_border
 client.focused          $accent   $surface  $text     $accent   $accent
@@ -53,21 +51,25 @@ bar {
 }
 
 # ── Autostart ─────────────────────────────────────────────────────────────────
-exec_always --no-startup-id bastille-launch-services
-exec --no-startup-id mako                           # notifications
-exec --no-startup-id nm-applet --indicator           # network tray
-exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+# mako (notifications), lxpolkit (pkexec dialogs) and kanshi are started here.
+exec --no-startup-id bastille-launch-services
+exec --no-startup-id swayidle -w \
+    timeout 180 'swaylock -f' \
+    timeout 600 'swaymsg "output * power off"' resume 'swaymsg "output * power on"' \
+    before-sleep 'swaylock -f'
 
-# First-boot wizard (runs only once)
-exec --no-startup-id bastille-setup
+# Live session: offer the installer. Installed system: finish first-boot setup.
+exec --no-startup-id bastille-autostart
 
 # ── Key bindings ──────────────────────────────────────────────────────────────
 bindsym $mod+Return       exec $term
 bindsym $mod+Space        exec $launcher
 bindsym $mod+q            kill
 bindsym $mod+Shift+r      reload
-bindsym $mod+l            exec $locker
+bindsym $mod+Escape       exec $locker
 bindsym $mod+comma        exec bastille-settings
+bindsym $mod+n            exec $term nmtui
+bindsym $mod+Shift+e      exec bastille-powermenu
 
 # Focus
 bindsym $mod+h            focus left
@@ -125,8 +127,8 @@ bindswitch lid:on exec $locker
 
 # ── Floating rules ────────────────────────────────────────────────────────────
 for_window [app_id="bastille-settings"]     floating enable, resize set 900 620
-for_window [app_id="bastille-setup"]        floating enable, resize set 600 680
-for_window [app_id="bastille-install"]      floating enable, resize set 680 500
+for_window [app_id="org.bastilleos.Setup"]     floating enable, resize set 700 680
+for_window [app_id="org.bastilleos.Installer"] floating enable, resize set 1024 680, move position center
 for_window [app_id="nm-connection-editor"]  floating enable
 for_window [app_id="pavucontrol"]           floating enable, resize set 500 400
 for_window [app_id="polkit-gnome*"]         floating enable

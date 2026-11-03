@@ -1,0 +1,14 @@
+#!/bin/sh
+# bastille-autostart — run once from the Sway config at login.
+#
+#   live session      -> the installer (its Welcome page says how to keep using
+#                        the live system; closing the window does exactly that)
+#   installed system  -> the first-boot setup wizard, until it has been completed
+#
+# Detected by what is mounted, not by a flag, so a stale file cannot change it.
+if [ -d /run/live/medium ] || grep -q 'boot=live' /proc/cmdline 2>/dev/null; then
+    exec bastille-install
+fi
+if [ ! -e /etc/bastille/setup.done ]; then
+    exec bastille-setup
+fi

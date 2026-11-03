@@ -67,12 +67,15 @@ chmod 700 /var/lib/bastille/firmware-backups
 cat > /etc/init.d/bastille-firmware-audit << 'EOF'
 #!/sbin/openrc-run
 description="Bastille sub-ring-0 firmware audit"
-command="/usr/local/sbin/bastille-firmware-audit"
-command_args="--quiet"
-command_background="no"
 depend() {
     after mountall.sh
     before net
+}
+# One-shot, not a daemon: run the audit and never block or fail the boot.
+start() {
+    ebegin "Auditing firmware"
+    /usr/local/sbin/bastille-firmware-audit --quiet || true
+    eend 0
 }
 EOF
 chmod +x /etc/init.d/bastille-firmware-audit

@@ -50,6 +50,14 @@ rc-update add ssh default || true
 # ── Getty: sysvinit's /etc/inittab already spawns getty on tty1-6, so there is
 # always a text login fallback (Ctrl+Alt+F1..F6). greetd uses VT7.
 
+# ── Serial console login (UTM / QEMU serial window, headless debugging) ──────
+case "$(dpkg --print-architecture)" in
+    arm64) SERIAL_TTY=ttyAMA0 ;;
+    *)     SERIAL_TTY=ttyS0 ;;
+esac
+grep -q "getty.* ${SERIAL_TTY} " /etc/inittab 2>/dev/null || \
+    echo "T0:23:respawn:/sbin/getty -L ${SERIAL_TTY} 115200 vt100" >> /etc/inittab
+
 # ── Sanity: show what OpenRC will actually start ─────────────────────────────
 rc-update show -v || true
 

@@ -16,3 +16,4 @@ build/*.qcow2
 build/*.img
 build/patch-sway.sh
 .freebuff/
+build/ci-artifacts/

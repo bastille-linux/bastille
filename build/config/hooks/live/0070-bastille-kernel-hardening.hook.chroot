@@ -5,12 +5,18 @@ set -e
 # USBGuard is enabled via OpenRC in hook 0010 (rc-update add usbguard).
 # Do NOT call systemctl here — we use OpenRC, not systemd.
 
-# Default USBGuard policy: block everything not present at install time.
-# Users add devices via: usbguard allow-device <id>
+# USBGuard policy.
+#   - Devices already present at boot are allowed. This matters: on a live USB the
+#     boot medium itself is a USB device, and deauthorizing it would pull the root
+#     filesystem out from under the running system. Keyboards and mice in a VM are
+#     present at boot too.
+#   - Devices inserted afterwards go through the rules below: input devices and
+#     hubs are allowed, everything else (mass storage, ...) is blocked until
+#     bastille-usb-inspector / `usbguard allow-device <id>` lets it in.
 cat > /etc/usbguard/usbguard-daemon.conf << 'EOF'
 RuleFile=/etc/usbguard/rules.conf
 ImplicitPolicyTarget=block
-PresentDevicePolicy=apply-policy
+PresentDevicePolicy=allow
 PresentControllerPolicy=keep
 InsertedDevicePolicy=apply-policy
 RestoreControllerDeviceState=false
@@ -21,12 +27,11 @@ DeviceRulesWithPort=false
 AuditBackend=LinuxAudit
 EOF
 
-# Initial allow rule: permit HID devices (keyboards/mice) so the
-# system is usable after install. Adjust this to your hardware.
 cat > /etc/usbguard/rules.conf << 'EOF'
-# Allow HID (keyboards, mice) — required for usability
-allow with-interface equals { 03:00:01 03:01:01 }
-allow with-interface equals { 03:00:02 03:01:02 }
+# Input devices: every interface is HID (keyboards, mice, tablets, composites).
+allow with-interface all-of { 03:*:* }
+# Hubs
+allow with-interface all-of { 09:*:* }
 # Block everything else by default
 block
 EOF

@@ -12,10 +12,11 @@ depend() {
     after elogind
 }
 
-start_pre() {
-    # Only start if DSM is explicitly enabled
-    if [ ! -f /etc/thl/dsm.enabled ]; then
+start() {
+    # Only run when DSM was explicitly enabled (bastille-set-pins creates the flag).
+    if [ ! -f /etc/bastille/dsm.enabled ]; then
         einfo "DSM not enabled — skipping watchdog"
-        return 1
+        return 0
     fi
+    default_start
 }

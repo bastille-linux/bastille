@@ -5,9 +5,6 @@
 # mako notification daemon
 pgrep -x mako >/dev/null 2>&1 || mako &
 
-# nm-applet (network tray icon)
-pgrep -f nm-applet >/dev/null 2>&1 || nm-applet --indicator &
-
 # polkit agent
 pgrep -f lxpolkit >/dev/null 2>&1 || lxpolkit &
 
