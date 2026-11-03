@@ -1,0 +1,3 @@
+FROM debian:bookworm
+RUN apt-get update -q && apt-get install -y -q squashfs-tools xorriso openssl && rm -rf /var/lib/apt/lists/*
+RUN mkdir /work

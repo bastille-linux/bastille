@@ -24,3 +24,5 @@ build/*.qcow2
 build/*.img
 .freebuff/
 build/ci-artifacts/
+.DS_Store
+build/patch-sway.sh
