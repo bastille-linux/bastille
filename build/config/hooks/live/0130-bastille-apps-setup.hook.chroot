@@ -32,6 +32,9 @@ PYEOF
 # ── User-facing apps (executable by user) ─────────────────────────────────────
 for bin in \
     /usr/local/bin/bastille-settings \
+    /usr/local/bin/bastille-store \
+    /usr/local/bin/bastille-files \
+    /usr/local/bin/bastille-shell \
     /usr/local/bin/bastille-setup \
     /usr/local/bin/bastille-launcher \
     /usr/local/bin/bastille-powermenu \

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=App Store
+Comment=Browse and install curated Flatpak apps
+Exec=bastille-store
+Icon=system-software-install-symbolic
+Terminal=false
+Categories=System;PackageManager;
+Keywords=store;apps;flatpak;install;software;
+StartupNotify=true

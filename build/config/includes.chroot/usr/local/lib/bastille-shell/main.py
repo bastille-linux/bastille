@@ -3,6 +3,21 @@
 import os
 import sys
 
+# The wrapper preloads gtk4-layer-shell for *this* process only; apps we start must not inherit it.
+os.environ.pop("LD_PRELOAD", None)
+
+
+def _extend_data_dirs():
+    """Make Flatpak-installed apps (and their icons) visible to Gio/GTK before either reads XDG_DATA_DIRS."""
+    parts = (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+    for extra in ("/var/lib/flatpak/exports/share", os.path.expanduser("~/.local/share/flatpak/exports/share")):
+        if extra not in parts:
+            parts.append(extra)
+    os.environ["XDG_DATA_DIRS"] = ":".join(parts)
+
+
+_extend_data_dirs()
+
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
@@ -15,10 +30,16 @@ import system  # noqa: E402
 from bar import Bar, Dock  # noqa: E402
 from center import ControlCenter, NotificationCenter, Toasts  # noqa: E402
 from launcher import Launcher  # noqa: E402
+from menus import AppleMenu  # noqa: E402
 from notifyd import Notifyd  # noqa: E402
 from theme import CSS  # noqa: E402
 
 APP_ID = "org.bastilleos.Shell"
+
+try:    # the shell has no visible stderr: keep tracebacks in ~/.cache/bastille-shell.log
+    sys.stderr = open(system.LOG, "a", buffering=1)
+except Exception:  # noqa: BLE001
+    pass
 
 
 class Shell(Gtk.Application):
@@ -42,6 +63,7 @@ class Shell(Gtk.Application):
         self.launcher = Launcher(self, self)
         self.nc = NotificationCenter(self, self)
         self.cc = ControlCenter(self, self)
+        self.apple = AppleMenu(self, self)
         self.bar.win.present()
         self.dock.win.present()
         self.ready = True
@@ -49,7 +71,14 @@ class Shell(Gtk.Application):
         system.sway_subscribe(self.queue_sync)
 
     def do_command_line(self, cl):
-        args = cl.get_arguments()[1:]
+        try:
+            self.run_command(cl.get_arguments()[1:])
+        except Exception:  # noqa: BLE001  never leave the caller hanging; the traceback goes to the log
+            import traceback
+            traceback.print_exc()
+        return 0
+
+    def run_command(self, args):
         if not self.ready:
             self.activate()
         a = args[0] if args else ""
@@ -58,15 +87,27 @@ class Shell(Gtk.Application):
         elif a == "--notifications":
             self.toggle("center")
         elif a == "--control":
-            self.toggle("control")
+            self.show_control(args[1] if len(args) > 1 else "main")
+        elif a == "--wifi":
+            self.show_control("wifi")
+        elif a == "--bluetooth":
+            self.show_control("bt")
+        elif a == "--apple-menu":
+            self.toggle("apple")
+        elif a == "--about":
+            self.close_panels()
+            self.apple.about()
+        elif a == "--force-quit":
+            self.show_force_quit()
         elif a == "--gallery":
             self.close_panels()
             self.nc.gallery.show()
         elif a == "--edit-controls":
             self.close_panels()
-            self.cc.editing = True
-            self.cc.build()
-            self.cc.overlay.show()
+            self.cc.show("edit")
+        elif a == "--edit-widgets":
+            self.close_panels()
+            self.nc.show(editing=True)
         elif a == "--dnd":
             self.toggle_dnd()
         elif a == "--notify":
@@ -74,7 +115,6 @@ class Shell(Gtk.Application):
                              args[3] if len(args) > 3 else "")
         elif a == "--close":
             self.close_panels()
-        return 0
 
     def do_activate(self):
         pass
@@ -97,7 +137,7 @@ class Shell(Gtk.Application):
 
     # ── panels ───────────────────────────────────────────────────────────────
     def close_panels(self):
-        for p in (self.launcher, self.nc, self.cc):
+        for p in (self.launcher, self.nc, self.cc, self.apple):
             if p.visible():
                 p.hide()
         self.nc.gallery.overlay.hide()
@@ -112,11 +152,21 @@ class Shell(Gtk.Application):
             self.launcher.entry.set_text(query)
 
     def toggle(self, which):
-        panel = self.nc if which == "center" else self.cc
+        panel = {"center": self.nc, "control": self.cc, "apple": self.apple}[which]
         was = panel.visible()
         self.close_panels()
         if not was:
             panel.show()
+
+    def show_control(self, page="main"):
+        was = self.cc.visible() and self.cc.page == page
+        self.close_panels()
+        if not was:
+            self.cc.show(page)
+
+    def show_force_quit(self):
+        self.close_panels()
+        self.apple.force_quit()
 
     def toggle_dnd(self):
         self.notifyd.dnd = not self.notifyd.dnd

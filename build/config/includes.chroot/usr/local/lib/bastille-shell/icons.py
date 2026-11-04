@@ -49,6 +49,29 @@ PATHS = {
     "vpn": "M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6zM9 12l2 2 4-4",
     "trash": "M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13",
     "grid": "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+    "store": "M5 8h14l-1 12H6zM9 8V6a3 3 0 016 0v2",
+    "minus": "M5 12h14",
+    "back": "M15 6l-6 6 6 6",
+    "info": "M12 3a9 9 0 100 18 9 9 0 000-18zM12 11v5M12 8h.01",
+    "airplane": "M3 13l8-2-3-7h2l6 6 5-1.5a1.5 1.5 0 010 3L16 13l-6 6H8l2-6z",
+    "coffee": "M5 9h11v6a4 4 0 01-4 4H9a4 4 0 01-4-4zM16 10h2a2 2 0 010 4h-2M8 3v3M12 3v3",
+    "camera": "M4 8h4l2-3h4l2 3h4v11H4zM12 11a3 3 0 100 6 3 3 0 000-6z",
+    "key": "M14 10a4 4 0 11-8 0 4 4 0 018 0zM12.8 12.8L20 20M17 17l2-2",
+    "display": "M3 5h18v11H3zM8 20h8M12 16v4",
+    "speaker": "M7 3h10v18H7zM12 8a1 1 0 100 .01M12 17a3 3 0 100-6 3 3 0 000 6z",
+    "keyboard": "M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8",
+    "user": "M12 12a4 4 0 100-8 4 4 0 000 8zM4 20a8 8 0 0116 0",
+    "hdd": "M3 14h18v6H3zM5 14l2-9h10l2 9M17 17h.01",
+    "printer": "M7 9V4h10v5M7 17H4v-7h16v7h-3M7 14h10v6H7z",
+    "access": "M12 4a1.5 1.5 0 100 .01M5 8l7 1 7-1M12 9v5M9 20l3-6 3 6",
+    "usb": "M12 3v14M12 17a2 2 0 100 4 2 2 0 000-4zM12 9l4-2v3M12 12l-4-2V8",
+    "bug": "M9 8a3 3 0 016 0v9a3 3 0 01-6 0zM5 10h4M15 10h4M5 15h4M15 15h4",
+    "face": "M12 3a9 9 0 100 18 9 9 0 000-18zM9 10h.01M15 10h.01M9 15h6",
+    "refresh": "M20 12a8 8 0 11-2.3-5.7M20 4v5h-5",
+    "signal": "M5 19v-3M10 19v-7M15 19V8M20 19V4",
+    "sparkle": "M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z",
+    "chat": "M4 5h16v11H9l-5 4z",
+    "edit": "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
 }
 
 # app tile gradients (top, bottom)
@@ -59,11 +82,13 @@ TILES = {
     "weather": ("#62ccfa", "#2a7be4"), "maps": ("#74dc74", "#2a9a4a"), "documents": ("#58a6ff", "#1c5fd6"),
     "sheets": ("#46dc86", "#128a47"), "presentations": ("#ffa94d", "#e0670f"), "install": ("#8a70ff", "#4a35d6"),
     "launcher": ("#6a6e74", "#34373b"), "generic": ("#7b8088", "#4a4e55"),
+    "store": ("#5ac8fa", "#2563e8"), "update": ("#8d8bff", "#4a43d8"), "setup": ("#a8aab0", "#5e6066"),
 }
 TILE_GLYPH = {"files": "folder", "browser": "globe", "terminal": "term", "settings": "gear", "mail": "mail",
               "messages": "msg", "notes": "notes", "calendar": "cal", "music": "music", "weather": "cloud",
               "maps": "map", "documents": "doc", "sheets": "table", "presentations": "slides",
-              "install": "download", "launcher": "apps", "generic": "apps"}
+              "install": "download", "launcher": "apps", "generic": "apps", "store": "store",
+              "update": "download", "setup": "gear"}
 
 _cache = {}
 
@@ -105,6 +130,24 @@ def tile(kind, size=52):
            f'<rect x="2.5" y="2.5" width="91" height="91" rx="21.5" fill="none" stroke="#ffffff" stroke-opacity="0.28"/>'
            f'<g transform="translate(24 24) scale(2)" fill="none" stroke="{stroke}" stroke-width="1.7" '
            f'stroke-linecap="round" stroke-linejoin="round"><path d="{glyph}"/></g></svg>')
+    img = Gtk.Image.new_from_paintable(_texture(svg))
+    img.set_pixel_size(size)
+    img.set_halign(Gtk.Align.CENTER)
+    img.set_valign(Gtk.Align.CENTER)
+    return img
+
+
+def badge(glyph, c1, c2, size=26, radius=None):
+    """Small gradient rounded-square badge with a white glyph (Settings sidebar, store categories)."""
+    px = size * 3
+    r = radius if radius is not None else 22
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{px}" height="{px}" viewBox="0 0 96 96">'
+           f'<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{c1}"/>'
+           f'<stop offset="1" stop-color="{c2}"/></linearGradient></defs>'
+           f'<rect x="2" y="2" width="92" height="92" rx="{r}" fill="url(#g)"/>'
+           f'<rect x="2.5" y="2.5" width="91" height="91" rx="{r - 0.5}" fill="none" stroke="#ffffff" stroke-opacity="0.25"/>'
+           f'<g transform="translate(22 22) scale(2.2)" fill="none" stroke="#ffffff" stroke-width="1.7" '
+           f'stroke-linecap="round" stroke-linejoin="round"><path d="{PATHS.get(glyph, PATHS["grid"])}"/></g></svg>')
     img = Gtk.Image.new_from_paintable(_texture(svg))
     img.set_pixel_size(size)
     img.set_halign(Gtk.Align.CENTER)

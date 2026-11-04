@@ -4,7 +4,10 @@
 # All other flatpak subcommands (run, list, update, remove) pass through unchanged.
 
 ALLOWED=(
+    "org.signal.Signal"
     "com.signal.Signal"
+    "com.bitwarden.desktop"
+    "fr.romainvigier.MetadataCleaner"
     "org.keepassxc.KeePassXC"
     "org.libreoffice.LibreOffice"
     "org.videolan.VLC"
@@ -26,10 +29,17 @@ ALLOWED=(
     "org.cryptomator.Cryptomator"
 )
 
-if [[ "${1:-}" == "install" ]]; then
-    for arg in "${@:2}"; do
-        # Skip flags
-        [[ "$arg" == -* ]] && continue
+# "flatpak --user install ..." must be gated too, so look for the verb anywhere before a "--".
+is_install=false
+for arg in "$@"; do
+    [[ "$arg" == "--" ]] && break
+    [[ "$arg" == "install" ]] && is_install=true && break
+done
+
+if $is_install; then
+    for arg in "$@"; do
+        # Skip flags and the verb itself
+        [[ "$arg" == -* || "$arg" == "install" ]] && continue
         # Check if it looks like an app ID (contains two dots)
         [[ "$arg" != *.*.* ]] && continue
         allowed=false

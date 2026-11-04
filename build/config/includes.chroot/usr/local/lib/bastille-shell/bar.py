@@ -10,32 +10,20 @@ from gi.repository import GLib, Gtk, Gtk4LayerShell as LS
 
 import icons
 import system
+from ui import bounce, layer_window  # noqa: F401  (layer_window re-exported for older imports)
 
 DOCK = [("files", "bastille-files"), ("browser", "bastille-browser"), ("terminal", "bastille-terminal"),
         ("mail", "bastille-mail"), ("messages", "bastille-messages"), ("notes", "bastille-notes"),
         ("calendar", "bastille-calendar"), ("music", "bastille-music"), ("weather", "bastille-weather"),
-        ("settings", "bastille-settings")]
-
-
-def layer_window(app, edge_anchors, layer=LS.Layer.TOP, exclusive=0, kb=LS.KeyboardMode.NONE, margins=None):
-    win = Gtk.Window(application=app)
-    win.add_css_class("shell")
-    win.set_decorated(False)
-    LS.init_for_window(win)
-    LS.set_layer(win, layer)
-    for edge in (LS.Edge.TOP, LS.Edge.BOTTOM, LS.Edge.LEFT, LS.Edge.RIGHT):
-        LS.set_anchor(win, edge, edge in edge_anchors)
-    for edge, m in (margins or {}).items():
-        LS.set_margin(win, edge, m)
-    if exclusive:
-        LS.set_exclusive_zone(win, exclusive)
-    LS.set_keyboard_mode(win, kb)
-    return win
+        ("store", "bastille-store"), ("settings", "bastille-settings")]
 
 
 def pretty_app(app_id):
     if not app_id:
-        return "Bastille"
+        return "Desktop"
+    known = system.app_name_for(app_id)
+    if known:
+        return known
     name = app_id.split(".")[-1]
     name = name.replace("bastille-", "").replace("-", " ")
     return name[:1].upper() + name[1:]
@@ -51,34 +39,45 @@ class Bar:
         logo = Gtk.Button()
         logo.add_css_class("barbtn")
         logo.set_child(icons.icon("shield", "#f4f6f5", 15, 2.0))
-        logo.connect("clicked", lambda *_: shell.show_launcher("apps"))
+        logo.set_tooltip_text("Bastille")
+        logo.connect("clicked", lambda *_: shell.toggle("apple"))
         box.append(logo)
 
-        self.app_label = Gtk.Label(label="Finder")
+        self.app_label = Gtk.Label(label="Desktop")
         self.app_label.add_css_class("app")
         self.app_label.set_margin_start(6)
         self.app_label.set_margin_end(10)
         box.append(self.app_label)
-        for name, cb in (("File", None), ("Edit", None), ("View", None), ("Window", None)):
-            lab = Gtk.Label(label=name)
-            lab.add_css_class("dim")
-            lab.set_margin_start(8)
-            lab.set_margin_end(8)
-            box.append(lab)
+        # Keep these compact and functional.  They used to be labels that looked
+        # like menu items but swallowed clicks without doing anything.
+        for name, action in ((
+                ("File", lambda: shell.show_launcher("files")),
+                ("Edit", lambda: shell.show_launcher("actions")),
+                ("View", lambda: shell.toggle("center")),
+                ("Window", lambda: shell.toggle("control")))):
+            menu = Gtk.Button(label=name)
+            menu.add_css_class("barbtn")
+            menu.add_css_class("dim")
+            menu.set_margin_start(2)
+            menu.set_margin_end(2)
+            menu.connect("clicked", lambda _button, action=action: action())
+            box.append(menu)
 
         spacer = Gtk.Box(hexpand=True)
         box.append(spacer)
 
         self.vpn = icons.icon("vpn", "#f4f6f5", 15)
-        self.net = Gtk.Box()
-        self.vol = Gtk.Box()
-        self.bat = Gtk.Box(spacing=4)
-        self.bat_lbl = Gtk.Label(label="")
-        for w in (self.vpn, self.net, self.vol, self.bat):
-            w.set_margin_start(6)
-            w.set_margin_end(6)
-            box.append(w)
+        self.vpn.set_margin_start(6)
+        self.vpn.set_margin_end(6)
+        box.append(self.vpn)
         self.vpn.set_visible(False)
+        # status items open the matching page of the control centre
+        self.bt = self.status_button(box, "bt")
+        self.net = self.status_button(box, "wifi")
+        self.vol = self.status_button(box, "main")
+        self.bat = self.status_button(box, "main", spacing=4)
+        self.bt.btn.set_visible(False)
+        self.bat.btn.set_visible(False)
 
         cc = Gtk.Button()
         cc.add_css_class("barbtn")
@@ -99,12 +98,23 @@ class Bar:
         self.refresh_status()
         GLib.timeout_add_seconds(15, self.refresh_status)
 
+    def status_button(self, box, page, spacing=0):
+        """Flat bar button that opens control-centre `page`; returns the inner Box to fill with an icon."""
+        inner = Gtk.Box(spacing=spacing)
+        b = Gtk.Button()
+        b.add_css_class("barbtn")
+        b.set_child(inner)
+        b.connect("clicked", lambda *_: self.shell.show_control(page))
+        box.append(b)
+        inner.btn = b
+        return inner
+
     def tick(self):
         self.clock_lbl.set_text(time.strftime("%a %-d %b  %H:%M"))
         return True
 
     def set_focused(self, app_id):
-        self.app_label.set_text(pretty_app(app_id) if app_id else "Finder")
+        self.app_label.set_text(pretty_app(app_id) if app_id else "Desktop")
 
     def refresh_status(self):
         def work():
@@ -112,11 +122,12 @@ class Bar:
             vol = system.volume()
             bat = system.battery()
             vpn = system.vpn_active()
-            GLib.idle_add(self.apply, net, vol, bat, vpn)
+            bt = system.bt_state()
+            GLib.idle_add(self.apply, net, vol, bat, vpn, bt)
         threading.Thread(target=work, daemon=True).start()
         return True
 
-    def apply(self, net, vol, bat, vpn):
+    def apply(self, net, vol, bat, vpn, bt="blocked"):
         def put(box, widget):
             c = box.get_first_child()
             while c:
@@ -126,6 +137,8 @@ class Bar:
         put(self.net, icons.icon({"wifi": "wifi", "eth": "eth"}.get(net[0], "wifi"),
                                  "#f4f6f5" if net[0] != "none" else "#8a8f8c", 15))
         put(self.vol, icons.icon("mute" if vol[1] else "volume", "#f4f6f5", 15))
+        put(self.bt, icons.icon("bt", "#f4f6f5", 15))
+        self.bt.btn.set_visible(bt == "on")
         self.vpn.set_visible(vpn)
         if bat:
             row = Gtk.Box(spacing=4)
@@ -133,24 +146,26 @@ class Bar:
             row.append(lbl)
             row.append(icons.icon("battery", "#f4f6f5", 17))
             put(self.bat, row)
-            self.bat.set_visible(True)
+            self.bat.btn.set_visible(True)
         else:
-            self.bat.set_visible(False)
+            self.bat.btn.set_visible(False)
         return False
 
 
 class Dock:
     def __init__(self, app, shell):
         self.shell = shell
-        self.win = layer_window(app, {LS.Edge.BOTTOM}, exclusive=88, margins={LS.Edge.BOTTOM: 8})
+        self.win = layer_window(app, {LS.Edge.BOTTOM}, exclusive=80, margins={LS.Edge.BOTTOM: 6})
         self.box = Gtk.Box(spacing=6)
         self.box.add_css_class("dock")
+        self.box.set_margin_top(18)       # headroom so hover-zoom and the launch bounce are not clipped
+        self.box.set_valign(Gtk.Align.END)
         self.items = []     # (kind, desktop_id, dot widget)
         for kind, did in DOCK:
             info = system.app_by_id(did + ".desktop")
             if info is None:
                 continue
-            self._add(kind, did, info.get_display_name(), lambda i=info: i.launch([], None))
+            self._add(kind, did, info.get_display_name(), lambda i=info: system.launch(i))
         sep = Gtk.Box()
         sep.add_css_class("dock-sep")
         self.box.append(sep)
@@ -168,18 +183,19 @@ class Dock:
         dot.set_opacity(0)
         col.append(dot)
         btn.set_child(col)
-        btn.connect("clicked", lambda *_: self.click(did, action, track))
+        btn.connect("clicked", lambda b, *_: self.click(did, action, track, b))
         self.box.append(btn)
         if track:
             self.items.append((did, dot))
 
-    def click(self, did, action, track):
+    def click(self, did, action, track, btn=None):
         if track:
-            app_id = did if did else ""
             wins = [w for w in system.sway_windows() if self.match(w[0], did)]
             if wins:
                 system.sway_msg(f'[con_id={wins[0][3]}]', "focus")
                 return
+            if btn is not None:
+                bounce(btn)
         action()
 
     @staticmethod

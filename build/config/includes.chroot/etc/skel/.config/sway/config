@@ -67,6 +67,8 @@ bindsym $mod+1            exec bastille-shell --launcher apps
 bindsym $mod+2            exec bastille-shell --launcher files
 bindsym $mod+3            exec bastille-shell --launcher clipboard
 bindsym $mod+c            exec bastille-shell --control
+bindsym $mod+Shift+a      exec bastille-shell --apple-menu
+bindsym $mod+Mod1+Escape  exec bastille-shell --force-quit
 bindsym $mod+Shift+n      exec bastille-shell --notifications
 bindsym $mod+q            kill
 bindsym $mod+Shift+r      reload
@@ -132,6 +134,8 @@ bindswitch lid:on exec $locker
 
 # ── Floating rules ────────────────────────────────────────────────────────────
 for_window [app_id="bastille-settings"]     floating enable, resize set 900 620
+for_window [app_id="org.bastilleos.Settings"] floating enable, resize set 980 660
+for_window [app_id="org.bastilleos.Store"]    floating enable, resize set 1040 700
 for_window [app_id="org.bastilleos.Setup"]     floating enable, resize set 700 680
 for_window [app_id="org.bastilleos.Installer"] fullscreen enable
 for_window [app_id="nm-connection-editor"]  floating enable

@@ -99,6 +99,10 @@ tor
 
 # Flatpak
 flatpak
+
+# Bluetooth tooling for the shell's Bluetooth panel. The service stays off and the radio rfkill-blocked
+# at boot (bastille-bluetooth-block); the user switches it on explicitly.
+bluez
 xdg-desktop-portal
 
 # Utilities

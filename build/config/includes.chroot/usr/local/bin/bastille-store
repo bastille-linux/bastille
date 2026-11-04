@@ -1,0 +1,650 @@
+#!/usr/bin/env python3
+"""Bastille App Store — browse, install, open, update and remove Flatpak apps.
+
+Everything goes through /usr/local/bin/flatpak (Bastille's gatekeeper), which only lets curated apps be installed,
+so the catalogue below is the full list of what can be installed. Installs are per-user (no root needed).
+"""
+
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+import threading
+
+from gi.repository import Adw, Gio, GLib, Gtk
+
+for _p in ("/usr/local/lib/bastille-shell",
+           os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib", "bastille-shell")):
+    if os.path.isdir(_p):
+        sys.path.insert(0, _p)
+import appstyle  # noqa: E402
+import icons     # noqa: E402
+
+APP_ID = "org.bastilleos.Store"
+FLATPAK = "/usr/local/bin/flatpak" if os.path.exists("/usr/local/bin/flatpak") else (shutil.which("flatpak") or "flatpak")
+FLATHUB = "https://dl.flathub.org/repo/flathub.flatpakrepo"
+
+# id, name, summary, description, category, badge glyph, gradient
+CATALOG = [
+    ("org.signal.Signal", "Signal", "Private messaging",
+     "End-to-end encrypted messages, voice and video calls from the Signal Foundation.",
+     "Communication", "chat", ("#5aa9ff", "#2a5fe0")),
+    ("org.telegram.desktop", "Telegram", "Fast, cloud-based messaging",
+     "The official Telegram desktop client for messages, channels and file sharing.",
+     "Communication", "chat", ("#5fc8ff", "#1f8fe0")),
+    ("io.github.mimbrero.WhatsAppDesktop", "WhatsApp", "WhatsApp Web in its own window",
+     "An unofficial desktop wrapper around WhatsApp Web.", "Communication", "chat", ("#52dd78", "#14a53c")),
+    ("org.mozilla.Thunderbird", "Thunderbird", "Email, calendars and contacts",
+     "A full-featured mail client with OpenPGP support built in.", "Communication", "mail", ("#58b4ff", "#2368e0")),
+    ("org.keepassxc.KeePassXC", "KeePassXC", "Offline password manager",
+     "Store passwords and secrets in an encrypted local database. No cloud, no account.",
+     "Privacy & Security", "key", ("#5dd68a", "#1d9a52")),
+    ("com.bitwarden.desktop", "Bitwarden", "Open-source password manager",
+     "Sync encrypted passwords across devices, or use it with a self-hosted server.",
+     "Privacy & Security", "key", ("#5aa0ff", "#2a5fd0")),
+    ("org.cryptomator.Cryptomator", "Cryptomator", "Encrypt your cloud files",
+     "Create encrypted vaults that look like ordinary folders.", "Privacy & Security", "lock",
+     ("#7be07a", "#2f9e34")),
+    ("org.onionshare.OnionShare", "OnionShare", "Share files over Tor",
+     "Send and receive files, host a website or chat — anonymously, through Tor.",
+     "Privacy & Security", "shield", ("#b28cff", "#6a3fd8")),
+    ("com.github.micahflee.torbrowser-launcher", "Tor Browser", "Browse with Tor",
+     "Downloads and keeps the official Tor Browser up to date.", "Privacy & Security", "globe",
+     ("#9b8cff", "#5a45d6")),
+    ("fr.romainvigier.MetadataCleaner", "Metadata Cleaner", "Strip hidden file metadata",
+     "View and remove metadata from documents, images and audio before sharing them.",
+     "Privacy & Security", "trash", ("#ffb24d", "#e07a10")),
+    ("org.electrum.electrum", "Electrum", "Lightweight Bitcoin wallet",
+     "A fast Bitcoin wallet with hardware-wallet support.", "Utilities", "download", ("#ffc94d", "#e08a10")),
+    ("org.libreoffice.LibreOffice", "LibreOffice", "Office suite",
+     "Writer, Calc, Impress, Draw and Base — documents, spreadsheets and presentations.",
+     "Productivity", "doc", ("#58a6ff", "#1c5fd6")),
+    ("md.obsidian.Obsidian", "Obsidian", "Notes that link together",
+     "A knowledge base built on plain Markdown files stored on your device.", "Productivity", "notes",
+     ("#a78bff", "#5b3fd0")),
+    ("org.gnome.gedit", "gedit", "Simple text editor",
+     "A small, friendly text editor with syntax highlighting.", "Productivity", "edit", ("#ffd84a", "#e8a900")),
+    ("org.gnome.Evince", "Document Viewer", "Read PDFs and documents",
+     "A lightweight viewer for PDF, PostScript, DjVu and more.", "Productivity", "doc", ("#ff8a6b", "#d6422a")),
+    ("org.gnome.Calculator", "Calculator", "Scientific calculator",
+     "Basic, scientific, programming and financial modes.", "Utilities", "grid", ("#a8aab0", "#5e6066")),
+    ("org.gnome.clocks", "Clocks", "World clocks, alarms and timers",
+     "Keep track of time around the world.", "Utilities", "clock", ("#4a4d52", "#1d1f22")),
+    ("net.mkiol.SpeechNote", "Speech Note", "Offline speech to text",
+     "Note taking, reading and translating with on-device speech models.", "Utilities", "speaker",
+     ("#ff6a82", "#d01f45")),
+    ("org.videolan.VLC", "VLC", "Plays almost anything",
+     "The classic media player for video, audio, discs and streams.", "Media", "music", ("#ffa94d", "#e0670f")),
+    ("org.audacityteam.Audacity", "Audacity", "Record and edit audio",
+     "Multi-track audio editor and recorder.", "Media", "music", ("#5aa0ff", "#2a5fd0")),
+    ("org.gimp.GIMP", "GIMP", "Image editor",
+     "Photo retouching, image composition and authoring.", "Creative", "edit", ("#b0a090", "#6a5a48")),
+    ("org.inkscape.Inkscape", "Inkscape", "Vector graphics",
+     "Professional vector drawing for logos, illustrations and diagrams.", "Creative", "sparkle",
+     ("#4a4d52", "#1d1f22")),
+]
+BY_ID = {c[0]: c for c in CATALOG}
+CATEGORIES = [("Privacy & Security", "shield", "#5dd68a", "#1d9a52"), ("Communication", "chat", "#5aa9ff", "#2a5fe0"),
+              ("Productivity", "doc", "#ffb24d", "#e07a10"), ("Media", "music", "#ff6a82", "#d01f45"),
+              ("Creative", "sparkle", "#ff8ad0", "#c83a98"), ("Utilities", "gear", "#a8aab0", "#5e6066")]
+FEATURED = "org.signal.Signal"
+
+
+def clean_env():
+    env = dict(os.environ)
+    env.pop("LD_PRELOAD", None)
+    return env
+
+
+def flatpak(*args, timeout=60):
+    try:
+        r = subprocess.run([FLATPAK, *args], capture_output=True, text=True, timeout=timeout, env=clean_env())
+        return r.returncode, r.stdout, r.stderr
+    except Exception as e:  # noqa: BLE001
+        return 1, "", str(e)
+
+
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def tidy(line):
+    """flatpak writes cursor/colour escapes even to pipes; keep only printable text."""
+    return ANSI.sub("", line).strip()
+
+
+def lab(text, *classes, xalign=0.0, **kw):
+    l = Gtk.Label(label=text, xalign=xalign, **kw)
+    for c in classes:
+        l.add_css_class(c)
+    return l
+
+
+def clear(box):
+    c = box.get_first_child()
+    while c:
+        box.remove(c)
+        c = box.get_first_child()
+
+
+def app_badge(app_id, size):
+    c = BY_ID.get(app_id)
+    if c:
+        return icons.badge(c[5], c[6][0], c[6][1], size)
+    return icons.badge("apps", "#8d9096", "#4a4d52", size)
+
+
+class GetButton(Gtk.Button):
+    """Get / Open / Installing… / Removing… — one per app, kept in sync by the store."""
+
+    def __init__(self, store, app_id, big=False):
+        super().__init__()
+        self.store, self.app_id = store, app_id
+        self.add_css_class("getbtn")
+        self.set_valign(Gtk.Align.CENTER)
+        self.set_size_request(120 if big else 104, 34 if big else -1)   # fixed width: labels change, layout must not
+        self.connect("clicked", self.on_click)
+        store.buttons.setdefault(app_id, []).append(self)
+        self.refresh()
+
+    def refresh(self):
+        busy = self.store.busy.get(self.app_id)
+        installed = self.app_id in self.store.installed
+        self.remove_css_class("open")
+        if busy:
+            self.set_label("Installing…" if busy == "install" else ("Removing…" if busy == "remove" else "Updating…"))
+            self.set_sensitive(False)
+        elif installed:
+            self.set_label("Open")
+            self.add_css_class("open")
+            self.set_sensitive(True)
+        else:
+            self.set_label("Get")
+            self.set_sensitive(True)
+
+    def on_click(self, *_):
+        if self.app_id in self.store.installed:
+            self.store.open_app(self.app_id)
+        else:
+            self.store.install(self.app_id)
+
+
+class Store(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app)
+        self.add_css_class("bapp")
+        self.set_title("App Store")
+        self.set_default_size(1040, 700)
+        self.installed = {}          # app id -> (name, version)
+        self.busy = {}               # app id -> 'install' | 'remove' | 'update'
+        self.buttons = {}            # app id -> [GetButton]
+        self.status = {}             # app id -> last progress line
+        self.nav_rows = {}
+        self.history = []
+        self.have_flatpak = os.path.exists(FLATPAK) or shutil.which("flatpak") is not None
+
+        root = Gtk.Box()
+
+        # ── sidebar ──
+        side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        side.add_css_class("bsidebar")
+        side.set_size_request(248, -1)
+        handle = Gtk.WindowHandle()
+        top = Gtk.Box(margin_start=14, margin_top=14, margin_bottom=8)
+        top.append(appstyle.traffic_lights())
+        handle.set_child(top)
+        side.append(handle)
+        self.search = Gtk.SearchEntry(placeholder_text="Search apps", margin_start=12, margin_end=12, margin_bottom=6)
+        self.search.connect("search-changed", self.on_search)
+        side.append(self.search)
+
+        self.nav = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        self.nav.connect("row-selected", self.on_nav)
+        entries = [("Discover", "store", "#5ac8fa", "#2563e8", "discover")]
+        sections = [("", entries), ("CATEGORIES", [(n, g, a, b, "cat:" + n) for n, g, a, b in CATEGORIES]),
+                    ("LIBRARY", [("Installed", "check", "#5dd68a", "#1d9a52", "installed"),
+                                 ("Updates", "refresh", "#8d8bff", "#4a43d8", "updates")])]
+        for title, items in sections:
+            if title:
+                hdr = Gtk.ListBoxRow(selectable=False, activatable=False)
+                hdr.set_child(lab(title, "bsection"))
+                self.nav.append(hdr)
+            for name, glyph, c1, c2, key in items:
+                row = Gtk.ListBoxRow()
+                box = Gtk.Box(spacing=10, margin_start=8, margin_end=8, margin_top=5, margin_bottom=5)
+                box.append(icons.badge(glyph, c1, c2, 26))
+                box.append(lab(name, hexpand=True))
+                if key == "updates":
+                    self.updates_lbl = lab("", "dim")
+                    box.append(self.updates_lbl)
+                row.set_child(box)
+                row._key = key
+                row._title = name
+                self.nav.append(row)
+                self.nav_rows[key] = row
+        sc = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        sc.set_child(self.nav)
+        side.append(sc)
+        root.append(side)
+
+        # ── content ──
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        chandle = Gtk.WindowHandle()
+        head = Gtk.Box(spacing=8, margin_start=22, margin_top=20, margin_bottom=4, margin_end=22)
+        self.back = Gtk.Button(icon_name="go-previous-symbolic")
+        self.back.add_css_class("flat")
+        self.back.set_visible(False)
+        self.back.connect("clicked", lambda *_: self.go_back())
+        head.append(self.back)
+        self.title = lab("Discover", "pagetitle", hexpand=True)
+        head.append(self.title)
+        chandle.set_child(head)
+        content.append(chandle)
+        self.banner = Adw.Banner(title="", button_label="Dismiss")
+        self.banner.connect("button-clicked", lambda b: b.set_revealed(False))
+        self.banner.set_revealed(False)
+        content.append(self.banner)
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, transition_duration=200,
+                               vexpand=True)
+        content.append(self.stack)
+        root.append(content)
+        self.set_content(root)
+
+        if not self.have_flatpak:
+            self.banner.set_title("Flatpak isn’t installed on this system, so apps can’t be installed.")
+            self.banner.set_revealed(True)
+        self.nav.select_row(self.nav_rows["discover"])
+        self.refresh_installed()
+        self.check_updates()
+
+    # ── navigation ────────────────────────────────────────────────────────────
+    def show(self, name, title, build, back=False):
+        old = self.stack.get_child_by_name(name)
+        if old is not None:
+            self.stack.remove(old)
+        page = build()
+        page.add_css_class("fade-in")
+        self.stack.add_named(page, name)
+        self.stack.set_visible_child_name(name)
+        self.title.set_text(title)
+        self.back.set_visible(back)
+
+    def on_nav(self, _lb, row):
+        if row is None or not hasattr(row, "_key"):
+            return
+        if self.search.get_text():
+            self.search.set_text("")     # fires on_search -> on_nav again, which shows the page
+            return
+        self.history = []
+        key = row._key
+        {"discover": lambda: self.show("discover", "Discover", self.page_discover),
+         "installed": lambda: self.show("installed", "Installed", self.page_installed),
+         "updates": lambda: self.show("updates", "Updates", self.page_updates)}.get(
+            key, lambda: self.show(key, row._title, lambda: self.page_category(row._title)))()
+
+    def go_back(self):
+        if self.history:
+            self.history.pop()()
+
+    def open_detail(self, app_id):
+        cur_title = self.title.get_text()
+        cur_page = self.stack.get_visible_child_name()
+        self.history.append(lambda: (self.stack.set_visible_child_name(cur_page), self.title.set_text(cur_title),
+                                     self.back.set_visible(bool(self.history))))
+        c = BY_ID.get(app_id)
+        self.show("detail", c[1] if c else app_id, lambda: self.page_detail(app_id), back=True)
+
+    def on_search(self, entry):
+        q = entry.get_text().strip().lower()
+        if not q:
+            row = self.nav.get_selected_row()
+            if row is not None:
+                self.on_nav(self.nav, row)
+            return
+        self.history = []
+        self.show("search", f"Results for “{entry.get_text().strip()}”", lambda: self.page_search(q))
+
+    # ── page builders ─────────────────────────────────────────────────────────
+    def scroller(self, inner):
+        sc = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        sc.set_child(inner)
+        return sc
+
+    def column(self):
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22, margin_start=22, margin_end=22,
+                      margin_top=8, margin_bottom=24)
+        return col
+
+    def card(self, app_id):
+        c = BY_ID[app_id]
+        card = Gtk.Box(spacing=12)
+        card.add_css_class("appcard")
+        card.append(app_badge(app_id, 58))
+        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER, hexpand=True, spacing=2)
+        v.append(lab(c[1], "heading", ellipsize=3, max_width_chars=18))
+        v.append(lab(c[2], "dim", "caption", ellipsize=3, max_width_chars=24))
+        card.append(v)
+        card.append(GetButton(self, app_id))
+        card.set_cursor_from_name("pointer")
+        g = Gtk.GestureClick()
+        g.connect("released", lambda *_: self.open_detail(app_id))
+        card.add_controller(g)
+        return card
+
+    def grid(self, ids):
+        fb = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, column_spacing=12, row_spacing=12,
+                         min_children_per_line=1, max_children_per_line=2, valign=Gtk.Align.START)
+        for i in ids:
+            fb.append(self.card(i))
+        return fb
+
+    def page_discover(self):
+        col = self.column()
+        c = BY_ID[FEATURED]
+        hero = Gtk.Box(spacing=18)
+        hero.add_css_class("hero")
+        if not getattr(self, "_hero_css", False):
+            provider = Gtk.CssProvider()
+            css = f".hero.h1 {{ background: linear-gradient(135deg, {c[6][0]}, {c[6][1]}); }}"
+            if hasattr(provider, "load_from_string"):
+                provider.load_from_string(css)
+            else:
+                provider.load_from_data(css.encode())
+            Gtk.StyleContext.add_provider_for_display(self.get_display(), provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+            self._hero_css = True
+        hero.add_css_class("h1")
+        hero.append(app_badge(FEATURED, 92))
+        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, valign=Gtk.Align.CENTER, hexpand=True)
+        v.append(lab("FEATURED", "caption", ellipsize=3))
+        v.append(lab(c[1], "title-1"))
+        v.append(lab(c[3], wrap=True, max_width_chars=48))
+        hero.append(v)
+        hero.append(GetButton(self, FEATURED, big=True))
+        hero.set_cursor_from_name("pointer")
+        g = Gtk.GestureClick()
+        g.connect("released", lambda *_: self.open_detail(FEATURED))
+        hero.add_controller(g)
+        col.append(hero)
+        for name, *_ in CATEGORIES:
+            ids = [x[0] for x in CATALOG if x[4] == name]
+            if not ids:
+                continue
+            sec = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            sec.append(lab(name, "title-3"))
+            sec.append(self.grid(ids))
+            col.append(sec)
+        return self.scroller(col)
+
+    def page_category(self, name):
+        col = self.column()
+        col.append(self.grid([x[0] for x in CATALOG if x[4] == name]))
+        return self.scroller(col)
+
+    def page_search(self, q):
+        col = self.column()
+        ids = [x[0] for x in CATALOG if q in x[1].lower() or q in x[2].lower() or q in x[3].lower() or q in x[0].lower()]
+        if ids:
+            col.append(self.grid(ids))
+        else:
+            sp = Adw.StatusPage(icon_name="system-search-symbolic", title="No results",
+                                description="The Bastille store only lists curated apps. Try a different search.")
+            col.append(sp)
+        return self.scroller(col)
+
+    def page_installed(self):
+        col = self.column()
+        if not self.installed:
+            col.append(Adw.StatusPage(icon_name="folder-download-symbolic", title="Nothing installed yet",
+                                      description="Apps you install from the store show up here."))
+            return self.scroller(col)
+        group = Adw.PreferencesGroup()
+        for app_id, (name, version) in sorted(self.installed.items(), key=lambda kv: kv[1][0].lower()):
+            row = Adw.ActionRow()
+            row.set_title(GLib.markup_escape_text(name))
+            row.set_subtitle(GLib.markup_escape_text(version or app_id))
+            row.add_prefix(app_badge(app_id, 36))
+            rm = Gtk.Button(label="Remove")
+            rm.add_css_class("pill")
+            rm.set_valign(Gtk.Align.CENTER)
+            rm.connect("clicked", lambda _b, a=app_id, n=name: self.confirm_remove(a, n))
+            row.add_suffix(rm)
+            row.add_suffix(GetButton(self, app_id))
+            group.add(row)
+        col.append(group)
+        return self.scroller(col)
+
+    def page_updates(self):
+        col = self.column()
+        self.updates_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        col.append(self.updates_box)
+        self.render_updates()
+        return self.scroller(col)
+
+    def render_updates(self):
+        if not hasattr(self, "updates_box"):
+            return
+        clear(self.updates_box)
+        ups = getattr(self, "updates", None)
+        if getattr(self, "updates_failed", False):
+            sp = Adw.StatusPage(icon_name="network-offline-symbolic", title="Couldn’t check for updates",
+                                description="Check your internet connection and try again.")
+            retry = Gtk.Button(label="Try Again", halign=Gtk.Align.CENTER)
+            retry.add_css_class("pill")
+            retry.connect("clicked", lambda *_: (setattr(self, "updates", None), setattr(self, "updates_failed", False),
+                                                 self.render_updates(), self.check_updates()))
+            sp.set_child(retry)
+            self.updates_box.append(sp)
+            return
+        if ups is None:
+            self.updates_box.append(Adw.StatusPage(icon_name="view-refresh-symbolic", title="Checking for updates…"))
+            return
+        if not ups:
+            self.updates_box.append(Adw.StatusPage(icon_name="object-select-symbolic", title="Everything is up to date"))
+            return
+        group = Adw.PreferencesGroup()
+        for app_id, name in ups:
+            row = Adw.ActionRow()
+            row.set_title(GLib.markup_escape_text(name))
+            row.set_subtitle(app_id)
+            row.add_prefix(app_badge(app_id, 36))
+            group.add(row)
+        self.updates_box.append(group)
+        btn = Gtk.Button(label="Update All")
+        btn.add_css_class("pill")
+        btn.add_css_class("suggested-action")
+        btn.set_halign(Gtk.Align.END)
+        btn.connect("clicked", lambda *_: self.update_all())
+        self.updates_box.append(btn)
+
+    def page_detail(self, app_id):
+        c = BY_ID.get(app_id)
+        name = c[1] if c else self.installed.get(app_id, (app_id,))[0]
+        col = self.column()
+        head = Gtk.Box(spacing=20)
+        head.append(app_badge(app_id, 104))
+        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, valign=Gtk.Align.CENTER, hexpand=True)
+        v.append(lab(name, "title-1"))
+        v.append(lab(c[2] if c else "Flatpak application", "dim"))
+        row = Gtk.Box(spacing=10, margin_top=6)
+        row.append(GetButton(self, app_id, big=True))
+        rm = Gtk.Button(label="Remove")
+        rm.add_css_class("pill")
+        rm.set_valign(Gtk.Align.CENTER)
+        rm.connect("clicked", lambda *_: self.confirm_remove(app_id, name))
+        rm.set_visible(app_id in self.installed)
+        self.detail_remove = rm
+        row.append(rm)
+        v.append(row)
+        head.append(v)
+        col.append(head)
+
+        self.detail_status = lab("", "dim", wrap=True)
+        self.detail_bar = Gtk.ProgressBar(visible=False)
+        col.append(self.detail_bar)
+        col.append(self.detail_status)
+        self.detail_id = app_id
+        self.tick_detail()
+
+        if c:
+            col.append(lab(c[3], wrap=True, max_width_chars=70))
+        info = Adw.PreferencesGroup()
+        info.set_title("Information")
+        for k, val in (("Category", c[4] if c else "—"), ("Application ID", app_id),
+                       ("Source", "Flathub, curated by Bastille"), ("Installed for", "this user only")):
+            r = Adw.ActionRow()
+            r.set_title(k)
+            r.set_subtitle(GLib.markup_escape_text(val))
+            info.add(r)
+        col.append(info)
+        return self.scroller(col)
+
+    # ── state / flatpak operations ────────────────────────────────────────────
+    def refresh_buttons(self):
+        for lst in self.buttons.values():
+            lst[:] = [b for b in lst if b.get_root() is not None]
+            for b in lst:
+                b.refresh()
+        self.tick_detail()
+
+    def tick_detail(self):
+        a = getattr(self, "detail_id", None)
+        bar = getattr(self, "detail_bar", None)
+        if a is None or bar is None or bar.get_root() is None:
+            return
+        busy = self.busy.get(a)
+        bar.set_visible(bool(busy))
+        if busy:
+            bar.pulse()
+        self.detail_status.set_text(self.status.get(a, "") if busy else "")
+        self.detail_remove.set_visible(a in self.installed and not busy)
+
+    def refresh_installed(self):
+        def work():
+            rc, out, _ = flatpak("list", "--app", "--columns=application,name,version")
+            apps = {}
+            if rc == 0:
+                for line in out.splitlines():
+                    parts = line.split("\t")
+                    if parts and parts[0].strip():
+                        apps[parts[0].strip()] = ((parts[1] if len(parts) > 1 else parts[0]).strip(),
+                                                  (parts[2] if len(parts) > 2 else "").strip())
+            GLib.idle_add(self.set_installed, apps)
+        threading.Thread(target=work, daemon=True).start()
+
+    def set_installed(self, apps):
+        self.installed = apps
+        self.refresh_buttons()
+        if self.stack.get_visible_child_name() == "installed":
+            self.show("installed", "Installed", self.page_installed)
+        return False
+
+    def check_updates(self):
+        def work():
+            rc, out, _ = flatpak("remote-ls", "--updates", "--app", "--columns=application,name", timeout=40)
+            ups = []
+            if rc == 0:
+                for line in out.splitlines():
+                    p = line.split("\t")
+                    if p and p[0].strip():
+                        ups.append((p[0].strip(), (p[1] if len(p) > 1 else p[0]).strip()))
+            GLib.idle_add(self.set_updates, ups, rc == 0)
+        threading.Thread(target=work, daemon=True).start()
+
+    def set_updates(self, ups, ok=True):
+        self.updates = ups
+        self.updates_failed = not ok
+        self.updates_lbl.set_text(str(len(ups)) if ups else "")
+        self.render_updates()
+        return False
+
+    def run_op(self, app_id, verb, cmds):
+        if self.busy.get(app_id):
+            return
+        self.busy[app_id] = verb
+        self.status[app_id] = "Starting…"
+        self.refresh_buttons()
+        pulse = GLib.timeout_add(250, lambda: (self.tick_detail(), bool(self.busy.get(app_id)))[1])
+
+        def work():
+            ok, last = True, ""
+            for cmd in cmds:
+                try:
+                    p = subprocess.Popen([FLATPAK, *cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                         text=True, env=clean_env())
+                    for line in p.stdout:
+                        line = tidy(line)
+                        if line:
+                            last = line
+                            self.status[app_id] = line
+                    if p.wait() != 0:
+                        ok = False
+                        break
+                except Exception as e:  # noqa: BLE001
+                    ok, last = False, str(e)
+                    break
+            GLib.idle_add(self.op_done, app_id, verb, ok, last)
+        threading.Thread(target=work, daemon=True).start()
+        return pulse
+
+    def op_done(self, app_id, verb, ok, last):
+        self.busy.pop(app_id, None)
+        name = BY_ID[app_id][1] if app_id in BY_ID else app_id
+        if ok:
+            self.banner.set_revealed(False)
+        else:
+            self.banner.set_title(f"Couldn’t {'install' if verb == 'install' else verb} {name}: {last[:160]}")
+            self.banner.set_revealed(True)
+        self.refresh_installed()
+        self.refresh_buttons()
+        if verb == "update":
+            self.check_updates()
+        return False
+
+    def install(self, app_id):
+        self.run_op(app_id, "install", [
+            ["remote-add", "--user", "--if-not-exists", "flathub", FLATHUB],
+            ["install", "--user", "-y", "--noninteractive", "flathub", app_id]])
+
+    def remove(self, app_id):
+        self.run_op(app_id, "remove", [["uninstall", "-y", "--noninteractive", app_id]])
+
+    def update_all(self):
+        self.run_op("__all__", "update", [["update", "-y", "--noninteractive"]])
+
+    def open_app(self, app_id):
+        try:
+            subprocess.Popen([FLATPAK, "run", app_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True, env=clean_env())
+        except Exception as e:  # noqa: BLE001
+            self.banner.set_title(f"Couldn’t open {app_id}: {e}")
+            self.banner.set_revealed(True)
+
+    def confirm_remove(self, app_id, name):
+        dlg = Adw.MessageDialog.new(self)
+        dlg.set_heading(f"Remove {name}?")
+        dlg.set_body("The app is removed. Its data in ~/.var/app is kept.")
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("remove", "Remove")
+        dlg.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.connect("response", lambda d, r: self.remove(app_id) if r == "remove" else None)
+        dlg.present()
+
+
+class StoreApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.connect("activate", self.on_activate)
+
+    def on_activate(self, app):
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        appstyle.install()
+        win = app.get_active_window() or Store(app)
+        win.present()
+
+
+if __name__ == "__main__":
+    sys.exit(StoreApp().run(sys.argv))

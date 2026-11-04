@@ -7,6 +7,15 @@ import sys, os, subprocess, shutil, stat
 from pathlib import Path
 from gi.repository import Gtk, Adw, Gio, GLib
 
+for _p in ("/usr/local/lib/bastille-shell",
+           os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib", "bastille-shell")):
+    if os.path.isdir(_p):
+        sys.path.insert(0, _p)
+try:
+    import appstyle      # shared Bastille app look
+except Exception:        # the app must still start without it
+    appstyle = None
+
 APP_ID = "org.bastilleos.Files"
 HOME = Path.home()
 
@@ -73,6 +82,7 @@ class FileRow(Adw.ActionRow):
 class FilesWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
+        self.add_css_class("bapp")
         self.set_title("Files")
         self.set_default_size(820, 540)
         self._cwd = HOME
@@ -395,9 +405,26 @@ class FilesWindow(Adw.ApplicationWindow):
 
 
 class FilesApp(Adw.Application):
+    """Opens a window on activate, and on `bastille-files <folder>` / xdg-open of a directory."""
+
     def __init__(self):
-        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
-        self.connect("activate", lambda a: FilesWindow(a).present())
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN)
+        self.connect("activate", lambda a: self._window(None))
+        self.connect("open", self._on_open)
+
+    def _window(self, path):
+        if appstyle:
+            appstyle.install()
+        win = FilesWindow(self)
+        if path is not None and path.is_dir():
+            win._navigate(path)
+        win.present()
+
+    def _on_open(self, app, files, _n, _hint):
+        for f in files:
+            p = Path(f.get_path() or "")
+            self._window(p if p.is_dir() else p.parent)
+
 
 if __name__ == "__main__":
     Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)

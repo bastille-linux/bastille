@@ -11,7 +11,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Gtk4LayerShell as LS
 
 import icons
 import system
-from bar import layer_window
+from ui import Overlay
 
 HOME = os.path.expanduser("~")
 MODES = [("search", "search", "Search"), ("apps", "apps", "Applications"), ("files", "folder", "Files"),
@@ -29,9 +29,15 @@ def app_icon(info, size=34):
     if k:
         return icons.tile(k, size)
     gi_ = info.get_icon()
-    img = Gtk.Image.new_from_gicon(gi_) if gi_ else icons.tile("generic", size)
-    img.set_pixel_size(size)
-    return img
+    if gi_ is not None:
+        # only use the themed icon if the theme actually has it, otherwise we would show a blank/broken image
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        names = gi_.get_names() if isinstance(gi_, Gio.ThemedIcon) else None
+        if names is None or any(theme.has_icon(n) for n in names):
+            img = Gtk.Image.new_from_gicon(gi_)
+            img.set_pixel_size(size)
+            return img
+    return icons.tile("generic", size)
 
 
 def calc(q):
@@ -47,24 +53,13 @@ def calc(q):
 class Launcher:
     def __init__(self, app, shell):
         self.shell = shell
-        self.win = layer_window(app, {LS.Edge.TOP, LS.Edge.BOTTOM, LS.Edge.LEFT, LS.Edge.RIGHT},
-                                layer=LS.Layer.OVERLAY, kb=LS.KeyboardMode.EXCLUSIVE, exclusive=-1)
-        self.win.add_css_class("catcher")
-        click = Gtk.GestureClick()
-        click.connect("pressed", lambda *_: self.hide())
-        self.win.add_controller(click)
-
         self.mode = "search"
         self.rows = []
         self.sel = 0
         self.apps = []
+        self._deb = 0
 
-        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, halign=Gtk.Align.CENTER,
-                      valign=Gtk.Align.START)
-        col.set_margin_top(150)
-        stop = Gtk.GestureClick()
-        stop.connect("pressed", lambda g, *_: g.set_state(Gtk.EventSequenceState.CLAIMED))
-        col.add_controller(stop)
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
 
         top = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER)
         pill = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
@@ -72,7 +67,7 @@ class Launcher:
         pill.set_size_request(560, 64)
         pill.append(icons.icon("search", "#f4f6f5", 24, 2.0))
         self.entry = Gtk.Entry(hexpand=True, placeholder_text="Spotlight Search", has_frame=False)
-        self.entry.connect("changed", lambda *_: self.refresh())
+        self.entry.connect("changed", lambda *_: self.refresh_soon())
         self.entry.connect("activate", lambda *_: self.activate())
         pill.append(self.entry)
         top.append(pill)
@@ -96,8 +91,9 @@ class Launcher:
         self.results = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.results_wrap.set_child(self.results)
         col.append(self.results_wrap)
-        self.win.set_child(col)
 
+        self.ov = Overlay(app, col, Gtk.Align.CENTER, Gtk.Align.START, (150, 0, 0, 0))
+        self.win = self.ov.win
         keys = Gtk.EventControllerKey()
         keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         keys.connect("key-pressed", self.on_key)
@@ -105,17 +101,17 @@ class Launcher:
 
     # ── show / hide ───────────────────────────────────────────────────────────
     def visible(self):
-        return self.win.get_visible()
+        return self.ov.visible()
 
     def show(self, mode="search"):
         self.entry.set_text("")
         self.apps = system.all_apps()
-        self.win.present()
+        self.ov.show()
         self.set_mode(mode)
         self.entry.grab_focus()
 
     def hide(self):
-        self.win.set_visible(False)
+        self.ov.hide()
 
     def set_mode(self, mode):
         self.mode = mode
@@ -127,11 +123,25 @@ class Launcher:
         self.refresh()
         self.entry.grab_focus()
 
+    def refresh_soon(self):
+        """Debounce typing: the file search shells out to find."""
+        if self._deb:
+            GLib.source_remove(self._deb)
+        self._deb = GLib.timeout_add(90, self._refresh_now)
+
+    def _refresh_now(self):
+        self._deb = 0
+        self.refresh()
+        return False
+
     # ── keys ─────────────────────────────────────────────────────────────────
     def on_key(self, _c, keyval, _code, state):
         if keyval == Gdk.KEY_Escape:
             self.hide()
             return True
+        if self._deb and keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            GLib.source_remove(self._deb)
+            self._refresh_now()
         ctrl = state & Gdk.ModifierType.CONTROL_MASK
         if keyval in (Gdk.KEY_Down, Gdk.KEY_Tab) or (ctrl and keyval == Gdk.KEY_n):
             self.move(1)
@@ -220,7 +230,7 @@ class Launcher:
     def add_app_rows(self, apps):
         for a in apps:
             self.row(app_icon(a), a.get_display_name(), a.get_description() or "Application",
-                     lambda a=a: a.launch([], None))
+                     lambda a=a: system.launch(a))
 
     def r_search(self, q):
         if not q:
@@ -255,16 +265,16 @@ class Launcher:
             l.add_css_class("small")
             v.append(l)
             b.set_child(v)
-            b.connect("clicked", lambda _b, a=a: (self.hide(), a.launch([], None)))
+            b.connect("clicked", lambda _b, a=a: (self.hide(), system.launch(a)))
             grid.append(b)
-            self.rows.append((b, lambda a=a: (self.hide(), a.launch([], None))))
+            self.rows.append((b, lambda a=a: (self.hide(), system.launch(a))))
         self.results.append(grid)
         self.results_wrap.set_size_request(640, 440)
 
     def find_files(self, q, n):
         try:
-            out = subprocess.run(["find", HOME, "-maxdepth", "5", "-not", "-path", "*/.*", "-iname", f"*{q}*"],
-                                 capture_output=True, text=True, timeout=1.5).stdout.splitlines()
+            out = subprocess.run(["find", HOME, "-maxdepth", "4", "-not", "-path", "*/.*", "-iname", f"*{q}*"],
+                                 capture_output=True, text=True, timeout=1.0).stdout.splitlines()
         except Exception:  # noqa: BLE001
             out = []
         return out[:n]
@@ -274,7 +284,7 @@ class Launcher:
             isdir = os.path.isdir(p)
             self.row(icons.icon("folder" if isdir else "doc", "#9ec5ff" if isdir else "#f4f6f5", 28),
                      os.path.basename(p), os.path.dirname(p).replace(HOME, "~"),
-                     lambda p=p: system.spawn(["xdg-open", p]))
+                     lambda p=p: system.open_path(p))
 
     def r_files(self, q):
         if q:
@@ -317,6 +327,8 @@ class Launcher:
                 ("Do Not Disturb", "moon", lambda: s.toggle_dnd()),
                 ("Control Center", "sliders", lambda: s.toggle("control")),
                 ("Settings", "gear", lambda: system.spawn(["bastille-settings"])),
+                ("App Store", "store", lambda: system.spawn(["bastille-store"])),
+                ("Force Quit…", "x", lambda: s.show_force_quit()),
                 ("Log Out", "x", lambda: system.sway_msg("exit")),
                 ("Restart", "restart", lambda: system.spawn(["loginctl", "reboot"])),
                 ("Power Off", "power", lambda: system.spawn(["loginctl", "poweroff"]))]

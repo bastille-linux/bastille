@@ -1,8 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Bastille Settings
+Name=Settings
 Comment=System settings for Bastille OS
 Exec=bastille-settings
 Icon=preferences-system-symbolic
 Categories=Settings;
 StartupWMClass=bastille-settings
+Keywords=settings;preferences;system;
