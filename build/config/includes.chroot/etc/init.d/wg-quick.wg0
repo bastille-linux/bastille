@@ -5,9 +5,9 @@ description="WireGuard VPN (wg0)"
 WG_CONF="/etc/wireguard/wg0.conf"
 
 depend() {
-    use networking
-    after networking
-    after nftables thl-dns-lock
+    need NetworkManager
+    after NetworkManager nftables dnscrypt-proxy thl-dns-lock
+    before bastille-network-guard
 }
 
 start() {

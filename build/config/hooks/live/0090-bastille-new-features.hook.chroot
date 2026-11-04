@@ -103,9 +103,8 @@ command_args="watch"
 command_background="yes"
 pidfile="/run/bastille-network-guard.pid"
 depend() {
-    use networking
-    after networking
-    after wg-quick.wg0
+    need NetworkManager
+    after NetworkManager dnscrypt-proxy thl-dns-lock wg-quick.wg0
 }
 EOF
 chmod +x /etc/init.d/bastille-network-guard

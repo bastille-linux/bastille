@@ -5,8 +5,9 @@
 description="Lock DNS to dnscrypt-proxy (immutable resolv.conf)"
 
 depend() {
-    after dnscrypt-proxy
-    before net
+    need dnscrypt-proxy
+    after NetworkManager dnscrypt-proxy
+    before wg-quick.wg0 bastille-network-guard
 }
 
 start() {
@@ -20,7 +21,9 @@ nameserver 127.0.0.1
 options edns0 trust-ad
 EOF
 
-    # Make immutable so nothing can overwrite it
+    # Make immutable so nothing can overwrite it. NetworkManager is also
+    # configured with dns=none/rc-manager=unmanaged as the non-privileged
+    # fallback for systems where chattr is unavailable.
     chattr +i /etc/resolv.conf 2>/dev/null || true
 
     eend $?

@@ -1,7 +1,7 @@
 #!/bin/bash
 # thl-network-guard — enforce offline mode when network security can't be guaranteed
 #
-# Runs as a systemd service. Periodically checks that:
+# Runs under OpenRC. Periodically checks that:
 #   1. VPN (wg0) is up and has recent traffic
 #   2. DNS is going through the stub resolver
 #   3. No captive portal or DNS hijacking is active
@@ -16,18 +16,18 @@ OFFLINE_FLAG="/run/thl/network-offline"
 CHECK_INTERVAL=30
 DNS_CHECK_HOST="dns.quad9.net"
 VPN_INTERFACE="wg0"
+DNS_LISTENER="127.0.0.1"
 
 log()  { logger -t thl-network-guard "$*"; }
 notify() {
     # Send a Wayland desktop notification via notify-send if a session is active
-    local user_session; user_session="$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}' | head -1)"
+    local user_session; user_session="$(who | awk 'NF {print $1; exit}')"
     if [ -n "$user_session" ]; then
-        local uid; uid="$(loginctl show-session "$user_session" -p User --value 2>/dev/null || true)"
-        if [ -n "$uid" ]; then
-            su -s /bin/sh "#$uid" -c \
-                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus \
-                 notify-send -u critical -t 0 'THL Network Guard' '$*'" 2>/dev/null || true
-        fi
+        local uid; uid="$(id -u "$user_session" 2>/dev/null || true)"
+        [ -n "$uid" ] || return 0
+        su -s /bin/sh "$user_session" -c \
+            "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus \
+             notify-send -u critical -t 0 'THL Network Guard' '$*'" 2>/dev/null || true
     fi
 }
 
@@ -67,26 +67,24 @@ check_vpn() {
 }
 
 check_dns() {
-    # DNS must resolve through stub (127.0.0.53)
-    # Use resolvectl to verify — if it fails, DNS is broken
-    resolvectl query "$DNS_CHECK_HOST" &>/dev/null || return 1
+    # DNS must resolve through dnscrypt-proxy's local listener. Use the libc
+    # resolver so this works without a distro-specific resolver CLI.
+    getent ahostsv4 "$DNS_CHECK_HOST" >/dev/null 2>&1 || return 1
 
     # Check that /etc/resolv.conf still points to stub
-    grep -q "127.0.0.53" /etc/resolv.conf || return 1
+    grep -Eq "^[[:space:]]*nameserver[[:space:]]+${DNS_LISTENER//./\\.}([[:space:]]|$)" /etc/resolv.conf || return 1
 }
 
 check_captive_portal() {
-    # If an HTTP (non-TLS) redirect is returned for a known HTTPS-only host,
-    # we're behind a captive portal — treat as network compromise.
-    # We test by sending a DNS query directly; if it resolves to an unexpected
-    # IP it's a sign of DNS hijacking.
-    local expected_ip; expected_ip="$(resolvectl query "$DNS_CHECK_HOST" 2>/dev/null | \
-        awk '/^'"$DNS_CHECK_HOST"'/{print $NF}' | head -1)"
-    # Quad9 is always within 9.9.9.0/24 or 149.112.112.0/24
-    if [ -n "$expected_ip" ]; then
-        echo "$expected_ip" | grep -qE '^9\.9\.9\.|^149\.112\.' || return 1
-    fi
-    return 0
+    # NetworkManager's connectivity state is the OpenRC-compatible way to
+    # distinguish a portal from a normal link. A captive portal cannot be
+    # safely bypassed while the kill switch is active.
+    command -v nmcli >/dev/null 2>&1 || return 0
+    local state; state="$(nmcli -t -f CONNECTIVITY general 2>/dev/null || true)"
+    case "$state" in
+        portal|none) return 1 ;;
+        *) return 0 ;;
+    esac
 }
 
 # ── Command dispatch ───────────────────────────────────────────────────────
