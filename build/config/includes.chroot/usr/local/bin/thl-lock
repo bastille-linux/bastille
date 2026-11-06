@@ -1,3 +1,4 @@
-#!/bin/bash
-# Bastille screen lock — called by Super+L keybind
-loginctl lock-session
+#!/bin/sh
+# Compatibility entry point for older configs. Bastille's canonical locker
+# evicts sensitive key material before drawing the lock surface.
+exec /usr/local/sbin/bastille-lock "$@"
