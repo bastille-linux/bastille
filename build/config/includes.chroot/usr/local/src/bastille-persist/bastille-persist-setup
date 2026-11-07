@@ -42,6 +42,28 @@ info() { echo "  $*"; }
 
 require_root() { [ "$(id -u)" -eq 0 ] || die "must run as root"; }
 
+validate_size() {
+    [[ "$PERSIST_SIZE_MB" =~ ^[0-9]+$ ]] || die "persistence size must be an integer"
+    [ "$PERSIST_SIZE_MB" -ge 512 ] || die "persistence size must be at least 512 MiB"
+}
+
+validate_disk() {
+    local device="$1" type
+    [ -b "$device" ] || die "$device is not a block device"
+    type="$(lsblk -dnro TYPE "$device" 2>/dev/null || true)"
+    [ "$type" = "disk" ] || die "$device must be a whole disk, not a partition"
+    findmnt -rn -S "$device" >/dev/null 2>&1 && die "$device is mounted"
+    lsblk -nrpo NAME,TYPE,MOUNTPOINT "$device" | awk '$2 == "part" && $3 != "" { found=1 } END { exit found ? 0 : 1 }' \
+        && die "a partition on $device is mounted"
+    mountpoint -q /run/live/medium 2>/dev/null && {
+        local live_medium
+        live_medium="$(readlink -f /run/live/medium 2>/dev/null || true)"
+        case "$live_medium" in
+            "$device"|"$device"[0-9]*|"$device"p[0-9]*) die "$device contains the active live medium" ;;
+        esac
+    }
+}
+
 # ── Detect the USB drive we booted from ───────────────────────────────────
 
 detect_live_device() {
@@ -63,9 +85,8 @@ detect_live_device() {
 create_persistence() {
     local device="$1"
     require_root
-
-    # Validate device
-    [ -b "$device" ] || die "$device is not a block device"
+    validate_size
+    validate_disk "$device"
 
     info "Target device: $device"
     info "Persistence size: ${PERSIST_SIZE_MB} MB"
@@ -73,23 +94,36 @@ create_persistence() {
     echo "  WARNING: This will ADD a partition to $device."
     echo "  Existing partitions will NOT be modified."
     echo
-    read -rp "  Type YES to continue: " ans
-    [[ "$ans" == "YES" ]] || { echo "Aborted."; exit 0; }
+    if [ "${ASSUME_YES:-0}" != 1 ]; then
+        read -rp "  Type YES to continue: " ans
+        [[ "$ans" == "YES" ]] || { echo "Aborted."; exit 0; }
+    fi
 
     # Find free space at end of device
     local sectors; sectors="$(blockdev --getsz "$device")"
     local sector_size; sector_size="$(blockdev --getss "$device")"
     info "Device sectors: $sectors (sector size: $sector_size bytes)"
 
-    # Use parted to add a new partition in the remaining free space
-    info "Adding persistence partition..."
-    parted -s "$device" mkpart primary "${PERSIST_SIZE_MB}MiB" -- -1MiB \
+    # Allocate exactly the requested size from the final free region, leaving
+    # 1 MiB at the end for partition-table alignment and future recovery tools.
+    local free_start free_end start_mib end_mib
+    free_start="$(parted -ms "$device" unit MiB print free | awk -F: '$5 == "free" { print $2; exit }')"
+    free_end="$(parted -ms "$device" unit MiB print free | awk -F: '$5 == "free" { last=$3 } END { print last }')"
+    [ -n "$free_start" ] && [ -n "$free_end" ] || die "could not identify free space on $device"
+    start_mib="$(awk -v end="${free_end%MiB}" -v size="$PERSIST_SIZE_MB" 'BEGIN { printf "%.0f", end - 1 - size }')"
+    end_mib="$(awk -v end="${free_end%MiB}" 'BEGIN { printf "%.0f", end - 1 }')"
+    awk -v start="$start_mib" -v free="${free_start%MiB}" 'BEGIN { exit !(start >= free) }' \
+        || die "not enough contiguous free space for ${PERSIST_SIZE_MB} MiB"
+    info "Adding persistence partition from ${start_mib}MiB to ${end_mib}MiB..."
+    parted -s "$device" mkpart primary "${start_mib}MiB" "${end_mib}MiB" \
         || die "parted failed — is there free space at the end of the device?"
+    partprobe "$device" 2>/dev/null || true
+    udevadm settle 2>/dev/null || true
 
     # Find new partition number
     local new_part
-    new_part="$(lsblk -no NAME "$device" | tail -1)"
-    local new_part_dev="/dev/$new_part"
+    new_part="$(lsblk -nrpo NAME,TYPE "$device" | awk '$2 == "part" { last=$1 } END { print last }')"
+    local new_part_dev="$new_part"
     [ -b "$new_part_dev" ] || die "Could not find new partition at $new_part_dev"
     info "New partition: $new_part_dev"
 
@@ -158,8 +192,8 @@ show_status() {
     echo "=== THL Persistence Status ==="
 
     # Check if running live
-    if [ -f /run/live/medium ]; then
-        info "Live boot detected (medium: $(cat /run/live/medium 2>/dev/null || echo 'unknown'))"
+    if mountpoint -q /run/live/medium 2>/dev/null; then
+        info "Live boot detected (medium: $(findmnt -nro SOURCE /run/live/medium 2>/dev/null || echo 'unknown'))"
     else
         info "Not running from live media"
     fi
@@ -186,15 +220,24 @@ nuke_persistence() {
     local device="${1:-}"
     [ -n "$device" ] || die "specify --device for nuke"
     require_root
+    validate_disk "$device"
 
     echo "  WARNING: This will PERMANENTLY DESTROY the persistence volume on $device."
-    read -rp "  Type NUKE to confirm: " ans
-    [[ "$ans" == "NUKE" ]] || { echo "Aborted."; exit 0; }
+    if [ "${ASSUME_YES:-0}" != 1 ]; then
+        read -rp "  Type NUKE to confirm: " ans
+        [[ "$ans" == "NUKE" ]] || { echo "Aborted."; exit 0; }
+    fi
 
-    # Find partition labelled thl-persist
-    local part
-    part="$(blkid -L thl-persist 2>/dev/null || true)"
+    # Find the labelled LUKS partition only among children of the requested
+    # disk; never let a label elsewhere in the system select the target.
+    local part child label
+    part=""
+    while read -r child; do
+        label="$(blkid -s LABEL -o value "$child" 2>/dev/null || true)"
+        if [ "$label" = "thl-persist" ]; then part="$child"; break; fi
+    done < <(lsblk -nrpo NAME,TYPE "$device" | awk '$2 == "part" { print $1 }')
     [ -n "$part" ] || die "No partition with label thl-persist found"
+    findmnt -rn -S "$part" >/dev/null 2>&1 && die "$part is mounted"
 
     # Close if open
     cryptsetup luksClose thl-persist 2>/dev/null || true
@@ -204,7 +247,10 @@ nuke_persistence() {
     shred -u -z -n 3 "$part" 2>/dev/null || dd if=/dev/urandom of="$part" bs=4M status=progress || true
 
     info "Removing partition..."
-    parted -s "$device" rm "$(lsblk -no PARTNO "$part")" || true
+    local partno
+    partno="$(lsblk -nrpo PARTNO "$part")"
+    [[ "$partno" =~ ^[0-9]+$ ]] || die "could not determine partition number for $part"
+    parted -s "$device" rm "$partno" || die "failed to remove $part"
 
     echo "  Persistence volume destroyed."
 }
@@ -213,22 +259,28 @@ nuke_persistence() {
 
 case "${1:---help}" in
     --device)
-        create_persistence "${2:-}"
+        [ "${2:-}" != "" ] || die "specify a whole disk with --device"
+        [ "${3:-}" = "--size" ] && PERSIST_SIZE_MB="${4:-}"
+        [ "${3:-}" = "--yes" ] && ASSUME_YES=1
+        [ "${5:-}" = "--yes" ] && ASSUME_YES=1
+        create_persistence "$2"
         ;;
     --status)
         show_status
         ;;
     --nuke)
-        nuke_persistence "${2:-}"
+        [ "${2:-}" != "" ] || die "specify a whole disk with --nuke"
+        [ "${3:-}" = "--yes" ] && ASSUME_YES=1
+        nuke_persistence "$2"
         ;;
     --help|-h|*)
         cat << 'EOF'
 thl-persist-setup — LUKS2-encrypted persistence for THL live USB
 
 Usage:
-  thl-persist-setup --device /dev/sdX   create persistence partition
+  thl-persist-setup --device /dev/sdX [--size MiB] [--yes]  create persistence partition
   thl-persist-setup --status            check persistence state
-  thl-persist-setup --nuke /dev/sdX     destroy persistence volume
+  thl-persist-setup --nuke /dev/sdX [--yes]  destroy persistence volume
 
 The persistence partition is labelled "persistence" so live-boot
 finds it automatically on next boot.

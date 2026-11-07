@@ -1,0 +1,88 @@
+#!/bin/bash
+# bastille-backup — encrypted user-data backup and restore.
+# Backups use an interactive age passphrase. Restore is non-destructive by
+# default and writes into a new directory.
+set -euo pipefail
+umask 077
+
+die() { echo "bastille-backup: ERROR: $*" >&2; exit 1; }
+info() { echo "bastille-backup: $*"; }
+[ "$(id -u)" -ge 1000 ] || die "run this as the desktop user, not root"
+command -v age >/dev/null 2>&1 || die "age is not installed"
+HOME_DIR="${HOME:?HOME is not set}"
+
+usage() {
+    cat <<'EOF'
+bastille-backup — encrypted home backup
+
+Usage:
+  bastille-backup create <archive.age>
+  bastille-backup list <archive.age>
+  bastille-backup restore <archive.age> [directory]
+  bastille-backup restore <archive.age> --into-home
+
+The archive is encrypted with an interactive age passphrase. Cache files and
+the desktop trash are omitted. Restore writes to a new directory by default;
+--into-home is an explicit merge into the current home directory.
+EOF
+}
+
+absolute_path() { realpath -m -- "$1" 2>/dev/null || die "cannot resolve path: $1"; }
+
+check_archive_hash() {
+    local archive="$1" expected actual
+    [ -f "$archive" ] || die "archive not found: $archive"
+    if [ -f "${archive}.sha256" ]; then
+        expected="$(awk 'NF {print $1; exit}' "${archive}.sha256")"
+        actual="$(sha256sum "$archive" | awk '{print $1}')"
+        [ "$expected" = "$actual" ] || die "archive checksum mismatch"
+    fi
+}
+
+create_backup() {
+    local archive="$1" tmp hash_tmp
+    archive="$(absolute_path "$archive")"
+    case "$archive" in "$HOME_DIR"/*) die "store the backup outside the home directory" ;; esac
+    [ ! -e "$archive" ] || die "refusing to overwrite existing archive"
+    mkdir -p "$(dirname -- "$archive")"
+    tmp="$(mktemp "${archive}.tmp.XXXXXX")"; hash_tmp="${tmp}.sha256"
+    trap 'rm -f -- "$tmp" "$hash_tmp"' RETURN
+    info "Creating encrypted backup of $HOME_DIR"
+    tar -C "$HOME_DIR" --exclude='./.cache' --exclude='./.local/share/Trash' \
+        --exclude='./.bastille-backup-*' -czf - . | age --encrypt --passphrase -o "$tmp"
+    [ -s "$tmp" ] || die "age produced an empty archive"
+    chmod 600 "$tmp"; sha256sum "$tmp" > "$hash_tmp"
+    mv -n -- "$tmp" "$archive" || die "archive appeared while creating it"
+    mv -n -- "$hash_tmp" "${archive}.sha256" || die "could not save archive checksum"
+    trap - RETURN; info "Backup created: $archive"
+}
+
+list_backup() {
+    local archive="$1" tmp
+    check_archive_hash "$archive"; tmp="$(mktemp)"; trap 'rm -f -- "$tmp"' RETURN
+    age --decrypt "$archive" > "$tmp"; tar -tzf "$tmp"
+    trap - RETURN; rm -f -- "$tmp"
+}
+
+restore_backup() {
+    local archive="$1" target="" tmp stamp
+    check_archive_hash "$archive"
+    if [ "${2:-}" = "--into-home" ]; then target="$HOME_DIR"
+    elif [ -n "${2:-}" ]; then target="$(absolute_path "$2")"
+    else stamp="$(date -u +%Y%m%dT%H%M%SZ)"; target="$HOME_DIR/bastille-restore-$stamp"; fi
+    if [ "$target" != "$HOME_DIR" ] && [ -e "$target" ]; then die "restore directory already exists: $target"; fi
+    mkdir -p -- "$target"; chmod 700 "$target"
+    tmp="$(mktemp)"; trap 'rm -f -- "$tmp"' RETURN
+    info "Decrypting and validating archive"
+    age --decrypt "$archive" > "$tmp"; tar -tzf "$tmp" >/dev/null || die "invalid Bastille backup"
+    tar -xzf "$tmp" -C "$target" --no-same-owner --no-same-permissions
+    trap - RETURN; rm -f -- "$tmp"; info "Restore complete: $target"
+}
+
+case "${1:-help}" in
+    create) [ "$#" -eq 2 ] || die "usage: bastille-backup create <archive.age>"; create_backup "$2" ;;
+    list) [ "$#" -eq 2 ] || die "usage: bastille-backup list <archive.age>"; list_backup "$2" ;;
+    restore) [ "$#" -ge 2 ] && [ "$#" -le 3 ] || die "usage: bastille-backup restore <archive.age> [directory|--into-home]"; restore_backup "$2" "${3:-}" ;;
+    help|--help|-h) usage ;;
+    *) die "unknown command: $1" ;;
+esac

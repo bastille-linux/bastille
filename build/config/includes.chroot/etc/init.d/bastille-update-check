@@ -12,6 +12,9 @@ depend() {
 }
 
 start() {
+    # Installed-to-disk systems use a different updater path; this service is
+    # only for replacing the live medium's squashfs.
+    [ -d /run/live/medium ] || return 0
     ebegin "Checking for Bastille OS updates"
     start-stop-daemon --start \
         --background \

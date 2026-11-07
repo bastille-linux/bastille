@@ -1,5 +1,5 @@
 #!/bin/bash
-# thl-lock — screen lock with RAM half eviction
+# bastille-lock — screen lock with RAM half eviction
 #
 # Calling this (instead of swaylock directly) ensures the kernel
 # keyring RAM half is evicted BEFORE the screen is obscured, so that

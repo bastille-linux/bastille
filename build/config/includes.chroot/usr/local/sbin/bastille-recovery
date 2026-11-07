@@ -1,0 +1,65 @@
+#!/bin/bash
+# bastille-recovery — small, local recovery points for installed systems.
+#
+# These snapshots intentionally cover Bastille's boot/security configuration,
+# not the user's home directory or the whole operating system.  They are
+# useful before package updates and can be restored from a rescue shell.
+set -euo pipefail
+
+STORE=/var/lib/bastille/recovery
+KEEP=${BASTILLE_RECOVERY_KEEP:-5}
+
+die() { echo "bastille-recovery: ERROR: $*" >&2; exit 1; }
+need_root() { [ "$(id -u)" -eq 0 ] || die "must run as root"; }
+ensure_store() { install -d -m 700 "$STORE"; }
+
+snapshot() {
+    need_root
+    ensure_store
+    local stamp dest tmp
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    dest="$STORE/$stamp.tar.gz"
+    tmp="$dest.new"
+    # Keep the archive deliberately scoped: no /home, caches, logs, or device
+    # state.  Missing optional paths are ignored for minimal installations.
+    tar -C / --ignore-failed-read -czf "$tmp" \
+        etc/bastille etc/fstab etc/crypttab etc/default/grub \
+        etc/NetworkManager/conf.d etc/wireguard boot/grub
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$dest"
+    find "$STORE" -maxdepth 1 -type f -name '*.tar.gz' -printf '%T@ %p\n' \
+        | sort -nr | tail -n +$((KEEP + 1)) | cut -d' ' -f2- \
+        | while IFS= read -r old; do [ -n "$old" ] && rm -f -- "$old"; done
+    echo "$dest"
+}
+
+list_points() {
+    need_root
+    ensure_store
+    find "$STORE" -maxdepth 1 -type f -name '*.tar.gz' -printf '%f\n' | sort -r
+}
+
+restore() {
+    need_root
+    ensure_store
+    local name="$1" archive
+    case "$name" in
+        *.tar.gz) archive="$STORE/$name" ;;
+        *) archive="$STORE/$name.tar.gz" ;;
+    esac
+    [ -f "$archive" ] || die "recovery point not found: $name"
+    tar -tzf "$archive" >/dev/null || die "recovery archive is invalid"
+    tar -C / --extract --gzip --file "$archive" \
+        --no-same-owner --no-same-permissions
+    echo "Restored $archive. Reboot before relying on the restored configuration."
+}
+
+case "${1:-snapshot}" in
+    snapshot) snapshot ;;
+    list) list_points ;;
+    restore)
+        [ "$#" -eq 2 ] || die "usage: bastille-recovery restore <name>"
+        restore "$2"
+        ;;
+    *) die "usage: bastille-recovery {snapshot|list|restore <name>}" ;;
+esac

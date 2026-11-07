@@ -1,0 +1,28 @@
+#!/sbin/openrc-run
+# Bastille — nftables ruleset supervision for OpenRC.
+
+description="Bastille nftables firewall"
+NFT="/usr/sbin/nft"
+RULES="/etc/nftables.conf"
+
+depend() {
+    after boot mountall.sh networkmanager
+    before dnscrypt-proxy bastille-dns-lock wg-quick.wg0 bastille-network-guard
+}
+
+start() {
+    ebegin "Loading Bastille nftables rules"
+    "$NFT" -f "$RULES"
+    eend $?
+}
+
+stop() {
+    ebegin "Removing Bastille nftables rules"
+    "$NFT" delete table inet thl 2>/dev/null || true
+    "$NFT" delete table inet thl-offline 2>/dev/null || true
+    eend 0
+}
+
+reload() {
+    start
+}

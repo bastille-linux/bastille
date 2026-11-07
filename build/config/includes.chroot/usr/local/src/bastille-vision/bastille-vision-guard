@@ -4,7 +4,7 @@ thl-vision-guard — focus loss lock + privacy screen daemon
 
 Two behaviours:
   1. FOCUS GUARD: if no face is detected for LOCK_AFTER_SECS seconds,
-     invoke thl-lock (evicts LUKS RAM half, then swaylock).
+     invoke bastille-lock (evicts LUKS RAM half, then swaylock).
 
   2. PRIVACY SCREEN: if 2+ faces are detected, immediately dim the
      display to PRIVACY_DIM_BRIGHTNESS. Restore when back to 1 face.

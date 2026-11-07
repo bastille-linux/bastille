@@ -1092,7 +1092,7 @@ class HardwareSecurityPage(Gtk.ScrolledWindow):
         ug.set_title("USBGuard")
         ug.set_description("Block unauthorized USB devices at kernel level")
         r1 = BastilleRow("USBGuard daemon", "Block all USB by default-deny policy", "drive-removable-media-symbolic", toggle=True, toggle_active=True,
-                         on_toggle=lambda v: pkexec("systemctl", "start" if v else "stop", "usbguard"))
+                         on_toggle=lambda v: pkexec("rc-service", "usbguard", "start" if v else "stop"))
         ug.add(r1)
 
         allow_row = Adw.ActionRow()

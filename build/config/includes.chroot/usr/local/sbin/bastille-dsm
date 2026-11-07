@@ -86,4 +86,4 @@ done
 # ── Step 4: Power off ─────────────────────────────────────────────────
 echo "[DSM] Powering off"
 sync
-systemctl poweroff --force --force
+poweroff --force --force

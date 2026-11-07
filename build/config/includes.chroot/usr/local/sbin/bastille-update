@@ -7,6 +7,7 @@
 # Usage:
 #   bastille-update check          — print available/installed version info
 #   bastille-update apply          — download, verify, and install update
+#   bastille-update rollback       — restore the last known-good live image
 #   bastille-update verify         — verify the currently installed squashfs
 #   bastille-update --version      — print installed version
 #
@@ -27,6 +28,8 @@ SHA256SUMS_ASSET_ARM64="${BASTILLE_SHA256SUMS_ASSET_ARM64:-SHA256SUMS-arm64}"
 VERSION_FILE="${BASTILLE_VERSION_FILE:-/etc/bastille/version}"
 BOOT_MEDIUM="${BASTILLE_BOOT_MEDIUM:-/run/live/medium}"
 SQUASHFS_PATH="${BASTILLE_SQUASHFS_PATH:-live/filesystem.squashfs}"
+PREVIOUS_SUFFIX="${BASTILLE_PREVIOUS_SUFFIX:-.previous}"
+FAILED_SUFFIX="${BASTILLE_FAILED_SUFFIX:-.failed}"
 DOWNLOAD_DIR="${BASTILLE_DOWNLOAD_DIR:-/var/cache/bastille-update}"
 NOTIFY_USER="${BASTILLE_NOTIFY_USER:-user}"
 
@@ -166,6 +169,74 @@ verify_sha256() {
     info "SHA256 OK: $actual"
 }
 
+live_image_paths() {
+    LIVE_CURRENT="$BOOT_MEDIUM/$SQUASHFS_PATH"
+    LIVE_PREVIOUS="${LIVE_CURRENT}${PREVIOUS_SUFFIX}"
+    LIVE_FAILED="${LIVE_CURRENT}${FAILED_SUFFIX}"
+    LIVE_VERSION="$BOOT_MEDIUM/live/bastille-version"
+    LIVE_PREVIOUS_VERSION="${LIVE_VERSION}${PREVIOUS_SUFFIX}"
+}
+
+install_live_image() {
+    local new_image="$1" new_version="$2"
+    live_image_paths
+    local old_version_tmp="$DOWNLOAD_DIR/previous-version"
+    local version_tmp="${LIVE_VERSION}.new"
+
+    # Preserve the currently bootable image and version before exposing the
+    # new one. The old image is retained on the medium for an explicit
+    # rollback from the running live session or a rescue shell.
+    rm -f "$LIVE_FAILED" "$LIVE_PREVIOUS_VERSION" "$old_version_tmp"
+    if [ -f "$LIVE_VERSION" ]; then
+        cp -f "$LIVE_VERSION" "$old_version_tmp"
+    fi
+    mv -f "$LIVE_CURRENT" "$LIVE_PREVIOUS"
+    if ! mv -f "$new_image" "$LIVE_CURRENT"; then
+        mv -f "$LIVE_PREVIOUS" "$LIVE_CURRENT" || true
+        die "could not activate the downloaded image; previous image restored"
+    fi
+    if [ -f "$old_version_tmp" ]; then
+        mv -f "$old_version_tmp" "$LIVE_PREVIOUS_VERSION"
+    fi
+
+    # Version metadata is transactional too. If it cannot be written, move
+    # the new image aside and put the old image back before reporting failure.
+    if ! printf '%s\n' "$new_version" > "$version_tmp" ||
+       ! mv -f "$version_tmp" "$LIVE_VERSION"; then
+        rm -f "$version_tmp"
+        mv -f "$LIVE_CURRENT" "$LIVE_FAILED" || true
+        mv -f "$LIVE_PREVIOUS" "$LIVE_CURRENT" || true
+        if [ -f "$LIVE_PREVIOUS_VERSION" ]; then
+            mv -f "$LIVE_PREVIOUS_VERSION" "$LIVE_VERSION" || true
+        fi
+        die "could not update live-image metadata; previous image restored"
+    fi
+    sync
+}
+
+cmd_rollback() {
+    require_root
+    require_live
+    require_writable_medium
+    live_image_paths
+    [ -f "$LIVE_PREVIOUS" ] || die "no previous live image is available"
+
+    info "Restoring the previous live image..."
+    rm -f "$LIVE_FAILED"
+    mv -f "$LIVE_CURRENT" "$LIVE_FAILED"
+    mv -f "$LIVE_PREVIOUS" "$LIVE_CURRENT"
+    if [ -f "$LIVE_PREVIOUS_VERSION" ]; then
+        mv -f "$LIVE_PREVIOUS_VERSION" "$LIVE_VERSION"
+    else
+        rm -f "$LIVE_VERSION"
+    fi
+    sync
+    restore_medium_ro
+    info "Previous image restored. Reboot to apply the rollback."
+    notify_user "Rollback ready — reboot to apply" \
+        "The previous Bastille OS live image has been restored."
+}
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 cmd_version() {
@@ -195,6 +266,10 @@ cmd_check() {
 
 cmd_apply() {
     require_root
+    if [ ! -d "$BOOT_MEDIUM" ]; then
+        cmd_apply_installed
+        return
+    fi
     require_live
 
     local installed latest release_json squashfs_url sha256_url
@@ -245,25 +320,33 @@ cmd_apply() {
     cp --sparse=always "$squashfs_tmp" "$squashfs_dest_tmp"
     sync
 
-    # Atomic rename
-    mv "$squashfs_dest_tmp" "$squashfs_dest"
-    sync
-
-    # Update version file on the live medium
-    echo "$latest" > "$BOOT_MEDIUM/live/bastille-version"
+    install_live_image "$squashfs_dest_tmp" "$latest"
 
     # Also update the in-memory version file (won't persist past this boot)
     echo "$latest" > "$VERSION_FILE"
 
-    restore_medium_ro
-
     # Clean up download cache
-    rm -f "$squashfs_tmp" "$sha256_tmp"
+    rm -f "$squashfs_tmp" "$sha256_tmp" "$squashfs_dest_tmp"
 
     info "Update installed: $installed → $latest"
     info "Reboot to run the new version."
     notify_user "Update ready — reboot to apply" \
         "Bastille OS updated from $installed to $latest. Reboot when ready."
+}
+
+cmd_apply_installed() {
+    require_root
+    command -v apt-get >/dev/null 2>&1 || die "apt-get is not available on this installation"
+    if command -v bastille-recovery >/dev/null 2>&1; then
+        info "Creating a recovery point before changing installed packages"
+        bastille-recovery snapshot >/dev/null || die "could not create recovery point; update cancelled"
+    fi
+    info "Installed system detected — applying signed Debian package updates"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update || die "package index refresh failed"
+    apt-get -y --with-new-pkgs upgrade || die "package upgrade failed; no reboot was performed"
+    info "Installed system packages updated successfully. Reboot if the kernel or core libraries changed."
+    notify_user "Bastille packages updated" "The installed system package updates completed successfully."
 }
 
 cmd_verify() {
@@ -280,6 +363,7 @@ cmd_verify() {
 case "${1:-help}" in
     check)      cmd_check ;;
     apply)      cmd_apply ;;
+    rollback)   cmd_rollback ;;
     verify)     cmd_verify ;;
     --version)  cmd_version ;;
     help|--help|-h)
@@ -289,11 +373,15 @@ bastille-update — verified in-place OS updater
 Usage:
   bastille-update check       check for a newer release on GitHub
   bastille-update apply       download, verify SHA256, and install
+  bastille-update rollback    restore the previous live image before reboot
   bastille-update verify      print SHA256 of the installed squashfs
   bastille-update --version   print installed version
 
-Updates are written to the live boot medium and take effect on next reboot.
-Persistence data (home, keys, configs) is unaffected.
+Live updates retain the previous bootable squashfs. If the new image does not
+work after inspection, run 'bastille-update rollback' and reboot. Updates take
+effect on next reboot.
+Installed systems use Debian's signed package repositories instead. Persistence
+data (home, keys, configs) is unaffected.
 EOF
         ;;
     *)

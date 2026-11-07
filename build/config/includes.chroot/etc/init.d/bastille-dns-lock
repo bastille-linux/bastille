@@ -6,7 +6,7 @@ description="Lock DNS to dnscrypt-proxy (immutable resolv.conf)"
 
 depend() {
     need dnscrypt-proxy
-    after NetworkManager dnscrypt-proxy
+    after networkmanager dnscrypt-proxy
     before wg-quick.wg0 bastille-network-guard
 }
 
@@ -15,7 +15,7 @@ start() {
 
     # Write static resolv.conf pointing at dnscrypt-proxy stub
     cat > /etc/resolv.conf << 'EOF'
-# Managed by thl-dns-lock — do not edit
+# Managed by bastille-dns-lock — do not edit
 # DNS handled by dnscrypt-proxy (DoH/DoT)
 nameserver 127.0.0.1
 options edns0 trust-ad

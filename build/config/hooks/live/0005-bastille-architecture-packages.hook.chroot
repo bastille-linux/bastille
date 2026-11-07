@@ -1,0 +1,13 @@
+#!/bin/sh
+# Install packages whose names are tied to the image architecture.
+set -eu
+
+arch="$(dpkg --print-architecture)"
+case "$arch" in
+    amd64) package=grub-efi-amd64-bin ;;
+    arm64) package=grub-efi-arm64-bin ;;
+    *) echo "[0005] unsupported image architecture: $arch" >&2; exit 2 ;;
+esac
+
+echo "[0005] installing architecture-specific package: $package"
+apt-get install --no-install-recommends --yes "$package"

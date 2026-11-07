@@ -4,7 +4,10 @@
 # ── Variables ─────────────────────────────────────────────────────────────────
 set $mod Mod4
 set $term foot
-set $locker swaylock -f
+# Always route locking through Bastille's keyguard-aware wrapper.  Calling
+# swaylock directly would leave the in-memory LUKS half resident during idle,
+# lid-close, suspend, and manual lock events.
+set $locker /usr/local/sbin/bastille-lock
 
 # Bastille colours
 set $bg          #0b0c10
@@ -53,9 +56,9 @@ exec --no-startup-id bastille-shell
 # lxpolkit (pkexec dialogs), kanshi and the clipboard history are started here.
 exec --no-startup-id bastille-launch-services
 exec --no-startup-id swayidle -w \
-    timeout 180 'swaylock -f' \
+    timeout 180 '/usr/local/sbin/bastille-lock' \
     timeout 600 'swaymsg "output * power off"' resume 'swaymsg "output * power on"' \
-    before-sleep 'swaylock -f'
+    before-sleep '/usr/local/sbin/bastille-lock'
 
 # Live session: the installer, fullscreen. Installed system: nothing to run.
 exec --no-startup-id bastille-autostart

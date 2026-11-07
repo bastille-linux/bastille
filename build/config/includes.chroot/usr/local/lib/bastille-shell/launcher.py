@@ -330,8 +330,8 @@ class Launcher:
                 ("App Store", "store", lambda: system.spawn(["bastille-store"])),
                 ("Force Quit…", "x", lambda: s.show_force_quit()),
                 ("Log Out", "x", lambda: system.sway_msg("exit")),
-                ("Restart", "restart", lambda: system.spawn(["loginctl", "reboot"])),
-                ("Power Off", "power", lambda: system.spawn(["loginctl", "poweroff"]))]
+                ("Restart", "restart", lambda: system.spawn(["reboot"])),
+                ("Power Off", "power", lambda: system.spawn(["poweroff"]))]
 
     def r_actions(self, q):
         for name, glyph, fn in self.action_list():

@@ -1,6 +1,7 @@
 # Bastille OS
 
-A security-hardened Debian 13 live Linux. Boots from USB into RAM. No traces left on the host.
+A security-hardened Debian 13 (Trixie) live and installable Linux desktop. It can
+run ephemerally from USB or install to an encrypted local disk for daily use.
 
 ---
 
@@ -8,7 +9,9 @@ A security-hardened Debian 13 live Linux. Boots from USB into RAM. No traces lef
 
 Bastille is a live OS designed for people who need genuine security — not security theatre. It runs entirely in RAM, randomises its hostname on every boot, encrypts DNS, enforces a WireGuard kill switch, and provides a duress system that can silently destroy keys or brick UEFI under coercion.
 
-It ships lean. The first-boot wizard lets you install the apps you actually want.
+The live image includes the core desktop, Firefox, PipeWire, Bluetooth, broad
+firmware coverage, printing/scanning support, Flatpak, and the Bastille apps.
+The first-boot wizard lets you choose which optional launchers remain enabled.
 
 ---
 
@@ -21,7 +24,9 @@ It ships lean. The first-boot wizard lets you install the apps you actually want
 | [`bastille-linux/security`](https://github.com/bastille-linux/security) | C security subsystems — duress, keyguard, USB inspector, gpggrid |
 | [`bastille-linux/site`](https://github.com/bastille-linux/site) | Website and docs |
 
-Apps are **not** baked into the ISO. The first-boot wizard fetches what you choose. Updates to apps don't require a new ISO.
+The core apps and their runtime dependencies are baked into the ISO. Optional
+app dependencies can be fetched by the installer or first-boot flow; app
+updates do not require a new ISO.
 
 ---
 
@@ -61,12 +66,54 @@ Requires Docker with `--privileged` support.
 
 ---
 
-## First boot
+## Live first boot
 
 1. Boot from USB
-2. Log in at the tuigreet console (`user` / no password by default — set one in the wizard)
-3. Sway compositor starts automatically
-4. First-boot wizard launches — choose your apps, set your PINs, configure WireGuard
+2. The Bastille greeter starts the Sway desktop
+3. Complete the setup wizard — choose apps, set PINs, and configure WireGuard
+
+The live image is intentionally ephemeral. Use the installer when you want a
+persistent encrypted root filesystem and a normal user account.
+
+The current installer requires Secure Boot to be disabled: the installed
+system uses Bastille's removable GRUB path and does not yet ship a Bastille-
+signed boot chain. The installer detects Secure Boot and refuses to erase a
+disk rather than producing an installation that firmware will not boot.
+
+## Installed systems
+
+The graphical installer creates a GPT layout with a 512 MiB EFI system
+partition, a 1 GiB `/boot`, and a LUKS2-encrypted ext4 root. It installs the
+OpenRC-based system and configures the selected user, profiles, accounts, and
+apps. Recovery entries remain enabled in GRUB.
+
+Installed systems update through signed Debian repositories with:
+
+```bash
+sudo bastille-update apply
+```
+
+Before an installed-system package update, Bastille creates a protected local
+configuration recovery point. List or restore points from a rescue shell with:
+
+```bash
+sudo bastille-recovery list
+sudo bastille-recovery restore <name>
+```
+
+Live-media updates retain the previous bootable image. If a newly downloaded
+image does not behave correctly after reboot, boot the live session, run
+`bastille-update rollback`, and reboot again.
+
+For user-data recovery, the desktop user can create an age-encrypted home
+backup on an external disk. Cache files and the desktop trash are omitted;
+restore writes to a new directory unless `--into-home` is explicitly used:
+
+```bash
+bastille-backup create /media/user/backup/bastille-home.age
+bastille-backup list /media/user/backup/bastille-home.age
+bastille-backup restore /media/user/backup/bastille-home.age
+```
 
 ---
 
@@ -97,8 +144,8 @@ Bastille is designed for:
 - Anyone who cannot trust the host machine they boot from
 
 It is **not** designed for:
-- Daily driver use on untrusted hardware with no WireGuard config
-- Replacing a hardened desktop OS for general use
+- A guaranteed hardware support matrix without testing the target machine
+- Recovery from a physically destroyed disk without an external backup
 - Scenarios where the attacker has unlimited pre-boot access
 
 ---

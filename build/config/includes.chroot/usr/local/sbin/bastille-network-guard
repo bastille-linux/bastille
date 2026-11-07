@@ -37,7 +37,7 @@ go_offline() {
         log "OFFLINE MODE: $reason"
         touch "$OFFLINE_FLAG"
         # Block all outbound except lo using nftables emergency table
-        nft -f /etc/nftables/thl-offline.nft 2>/dev/null || true
+        nft -f /etc/nftables/bastille-offline.nft 2>/dev/null || true
         notify "Network blocked: $reason. Run 'thl-network-guard --restore' to reconnect."
     fi
 }

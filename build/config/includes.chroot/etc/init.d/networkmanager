@@ -1,0 +1,20 @@
+#!/sbin/openrc-run
+# Bastille — NetworkManager supervision for an OpenRC system.
+# Debian ships NetworkManager's systemd unit but no OpenRC service script.
+
+description="NetworkManager network connectivity"
+command="/usr/sbin/NetworkManager"
+command_args="--no-daemon"
+command_background="yes"
+pidfile="/run/networkmanager.pid"
+
+depend() {
+    need dbus
+    provide networkmanager
+    after dbus
+    before dnscrypt-proxy bastille-dns-lock wg-quick.wg0 bastille-network-guard
+}
+
+start_pre() {
+    checkpath -d -m 0755 /run/NetworkManager
+}

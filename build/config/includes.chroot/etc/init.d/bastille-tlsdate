@@ -1,6 +1,6 @@
 #!/sbin/openrc-run
-# Bastille — HTTPS-based NTP via tlsdate
-# Replaces default NTP which reveals IP to time servers
+# Bastille — HTTPS-based NTP using curl's authenticated Date header.
+# Replaces default NTP which reveals IP to time servers.
 
 description="THL NTP via tlsdate"
 
@@ -11,13 +11,26 @@ depend() {
 
 start() {
     ebegin "Starting tlsdate NTP service"
-    # Run in background — network may not be ready; don't block boot
-    /usr/bin/tlsdate -s &
+    local header server_date
+
+    # curl is part of the base image. Try independent HTTPS endpoints and
+    # accept the first syntactically valid RFC 7231 Date header.
+    for header in \
+        https://www.cloudflare.com/ \
+        https://www.google.com/ \
+        https://deb.debian.org/; do
+        server_date="$(curl -fsSI --max-time 12 "$header" 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /^Date:/ {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}')"
+        if [ -n "$server_date" ] && date -u -d "$server_date" >/dev/null 2>&1; then
+            date -u -s "$server_date" >/dev/null
+            eend 0
+            return 0
+        fi
+    done
+
+    ewarn "No trusted HTTPS Date header was available; leaving the clock unchanged"
     eend 0
 }
 
 stop() {
-    ebegin "Stopping tlsdate"
-    kill -TERM $PID 2>/dev/null || true
-    eend 0
+    return 0
 }

@@ -6,6 +6,7 @@ It has no GUI and speaks JSON lines on stdout so bastille-install (the GTK
 wizard) or a shell can drive it.
 
     bastille-install-backend --list-disks
+    bastille-install-backend --preflight     # validate JSON config and target only
     bastille-install-backend --install        # JSON config on stdin
 
 Install config (stdin, one JSON object — secrets never touch argv):
@@ -189,6 +190,26 @@ def live_medium_disk():
         return None
 
 
+def secure_boot_enabled():
+    """Return whether UEFI Secure Boot is enabled on the live host.
+
+    Bastille currently installs its own removable GRUB path and does not yet
+    ship a signed boot chain. Refusing this combination is safer than letting
+    the installer report success for a system firmware will not execute.
+    """
+    try:
+        efivars_dir = "/sys/firmware/efi/efivars"
+        entry = next((name for name in os.listdir(efivars_dir)
+                      if name.startswith("SecureBoot-") and
+                      os.path.isfile(os.path.join(efivars_dir, name))), None)
+        if not entry:
+            return False
+        data = open(os.path.join(efivars_dir, entry), "rb").read()
+        return len(data) >= 5 and data[4] == 1
+    except (OSError, StopIteration):
+        return False
+
+
 def list_disks():
     out = subprocess.run(
         ["lsblk", "-J", "-b", "-o", "NAME,SIZE,MODEL,VENDOR,TYPE,RM,TRAN,RO"],
@@ -246,6 +267,9 @@ class Installer:
             raise InstallError("disk confirmation does not match")
         if self.disk == live_medium_disk():
             raise InstallError("refusing to erase the disk Bastille is running from")
+        if secure_boot_enabled():
+            raise InstallError("Secure Boot is enabled; Bastille's current bootloader is not signed. "
+                               "Disable Secure Boot before installing, or use a signed release build.")
         mounts = subprocess.run(["lsblk", "-no", "MOUNTPOINTS", self.disk],
                                 capture_output=True, text=True).stdout.split()
         if [m for m in mounts if m and m != "[SWAP]"]:
@@ -647,7 +671,7 @@ class Installer:
                     'GRUB_CMDLINE_LINUX_DEFAULT=""\n'
                     'GRUB_CMDLINE_LINUX=""\n'
                     'GRUB_DISABLE_OS_PROBER=true\n'
-                    'GRUB_DISABLE_RECOVERY=true\n'
+                    '# Recovery entries remain enabled so a failed userspace boot has a supported rescue path.\n'
                     'GRUB_DISABLE_LINUX_UUID=true\n')
         chroot("grub-install", f"--target={arch}", "--efi-directory=/boot/efi",
                "--boot-directory=/boot", "--removable", "--no-nvram",
@@ -703,6 +727,27 @@ class Installer:
         finally:
             self.cleanup()
 
+    def preflight(self):
+        """Run every non-destructive install check and emit a useful result.
+
+        The GUI can call this before presenting the final erase confirmation.
+        Keeping it separate from ``install`` makes it impossible for a disk
+        probe to fall through into partitioning as a side effect.
+        """
+        try:
+            self.step("check")
+            self.validate()
+            emit(event="preflight", disk=self.disk, architecture=platform.machine(),
+                 squashfs=self.squashfs)
+            emit(event="done")
+            return 0
+        except InstallError as e:
+            emit(event="error", msg=str(e))
+            return 1
+        except Exception as e:  # noqa: BLE001
+            emit(event="error", msg=f"unexpected error: {e!r}")
+            return 1
+
 
 def main():
     if "--list-disks" in sys.argv:
@@ -715,6 +760,13 @@ def main():
             emit(event="error", msg=f"bad config: {e}")
             return 2
         return Installer(cfg).install()
+    if "--preflight" in sys.argv:
+        try:
+            cfg = json.loads(sys.stdin.readline())
+        except Exception as e:
+            emit(event="error", msg=f"bad config: {e}")
+            return 2
+        return Installer(cfg).preflight()
     print(__doc__)
     return 0
 

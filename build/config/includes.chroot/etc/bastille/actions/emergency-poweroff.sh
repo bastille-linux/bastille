@@ -18,5 +18,5 @@ sleep 1
 # Sync nothing — we want an abrupt power-off, not a clean unmount.
 # If LUKS is set up, keys are only in RAM and are lost on power-off.
 echo o > /proc/sysrq-trigger 2>/dev/null \
-    || systemctl poweroff --force --force \
+    || poweroff --force --force \
     || halt -f -p

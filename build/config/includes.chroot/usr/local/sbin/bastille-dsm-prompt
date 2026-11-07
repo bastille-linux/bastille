@@ -239,16 +239,9 @@ def main():
 
     # Set DISPLAY / WAYLAND_DISPLAY from the active graphical session
     if "DISPLAY" not in os.environ and "WAYLAND_DISPLAY" not in os.environ:
-        # Try to find the active session's display
-        try:
-            result = subprocess.check_output(
-                ["loginctl", "show-session", "--value", "-p", "Display"],
-                text=True
-            ).strip()
-            if result:
-                os.environ["DISPLAY"] = result
-        except Exception:
-            os.environ["DISPLAY"] = ":0"
+        # OpenRC has no loginctl session query. The graphical session is
+        # conventionally on the first local Wayland/X display.
+        os.environ["DISPLAY"] = ":0"
 
     Gtk.init([])
     win = LockScreen()

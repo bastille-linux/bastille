@@ -29,6 +29,11 @@ def is_live():
     return os.path.exists("/run/live/medium")
 
 
+def flatpak_installable(app_id):
+    """Only accept IDs from the known Flatpak namespace catalogue."""
+    return app_id.startswith(("org.", "com.", "im.", "fr."))
+
+
 # ── Wizard pages ──────────────────────────────────────────────────────────────
 
 class WelcomePage(Adw.NavigationPage):
@@ -548,21 +553,53 @@ class SetupWizard(Adw.ApplicationWindow):
             "apps": self._apps_page.selected_apps(),
         }
 
+        failures = []
+        skipped_apps = [app_id for app_id in config["apps"] if not flatpak_installable(app_id)]
+        installable_apps = [app_id for app_id in config["apps"] if flatpak_installable(app_id)]
+
+        if config["storage_mode"] == "live" and not self._persist_page._skip.get_active():
+            device = self._persist_page._dev_entry.get_text().strip()
+            size = int(self._persist_page._size_row.get_value())
+            if not device.startswith("/dev/") or not os.path.isabs(device):
+                failures.append("Persistence target must be an absolute /dev path")
+            elif size < 512:
+                failures.append("Persistence size must be at least 512 MiB")
+            else:
+                rc, _, err = pkexec("/usr/local/bin/bastille-persist-setup", "--device", device,
+                                    "--size", str(size), "--yes")
+                if rc != 0:
+                    failures.append(f"Persistence setup failed: {err or 'helper returned an error'}")
+
         # Set password
         if self._user_page.passwords_match() and self._user_page.get_password():
-            pkexec("/usr/bin/chpasswd", f"user:{self._user_page.get_password()}")
+            rc, _, err = pkexec("/usr/bin/chpasswd", f"user:{self._user_page.get_password()}")
+            if rc != 0:
+                failures.append(f"Password setup failed: {err or 'helper returned an error'}")
+        elif self._user_page.get_password():
+            failures.append("Password confirmation does not match")
 
         # Set PINs
         for attr, pin_type in [("_duress", "duress"), ("_fake_duress", "fake-duress"), ("_dsm", "dsm")]:
             row = getattr(self._pins_page, attr)
             pin = row.get_text()
             if pin and len(pin) >= 4:
-                pkexec("/usr/local/sbin/bastille-set-pins", f"--type={pin_type}", f"--pin={pin}")
+                rc, _, err = pkexec("/usr/local/sbin/bastille-set-pins", f"--type={pin_type}", f"--pin={pin}")
+                if rc != 0:
+                    failures.append(f"{pin_type} PIN setup failed: {err or 'helper returned an error'}")
 
         # WireGuard
         wg = self._vpn_page.get_wg_conf()
         if wg:
-            pkexec("/usr/local/sbin/bastille-set-wg", "config", wg)
+            rc, _, err = pkexec("/usr/local/sbin/bastille-set-wg", "config", wg)
+            if rc != 0:
+                failures.append(f"WireGuard setup failed: {err or 'helper returned an error'}")
+
+        if skipped_apps:
+            failures.append("Not installable as Flatpaks: " + ", ".join(skipped_apps))
+
+        if failures:
+            self._show_apply_result("Setup incomplete", "\n".join(failures), error=True)
+            return
 
         # Write profile
         os.makedirs("/etc/bastille", exist_ok=True)
@@ -570,15 +607,12 @@ class SetupWizard(Adw.ApplicationWindow):
             f.write(config["profile"])
 
         # Install apps (background)
-        if config["apps"]:
-            apps = config["apps"]
+        if installable_apps:
+            apps = installable_apps
             def install_apps():
                 for app_id in apps:
-                    if app_id.startswith("org.") or app_id.startswith("com.") or \
-                       app_id.startswith("im.") or app_id.startswith("fr."):
-                        subprocess.run(["flatpak", "install", "-y", "--noninteractive",
-                                        "flathub", app_id],
-                                       capture_output=True)
+                    result = subprocess.run(["flatpak", "install", "-y", "--noninteractive",
+                                             "flathub", app_id], capture_output=True, text=True)
             import threading
             t = threading.Thread(target=install_apps, daemon=True)
             t.start()
@@ -589,12 +623,15 @@ class SetupWizard(Adw.ApplicationWindow):
 
         # Mark setup done
         open(DONE_FLAG, "w").close()
+        self._show_apply_result("Setup Complete", "Your Bastille OS environment is configured.\nApps are installing in the background.")
 
+    def _show_apply_result(self, title, description, error=False):
         sp = Adw.StatusPage()
         sp.set_icon_name("emblem-ok-symbolic")
-        sp.set_title("Setup Complete")
-        sp.set_description("Your Bastille OS environment is configured.\n"
-                           "Apps are installing in the background.")
+        sp.set_title(title)
+        sp.set_description(description)
+        if error:
+            sp.set_icon_name("dialog-error-symbolic")
         done_btn = Gtk.Button.new_with_label("Start Bastille OS")
         done_btn.add_css_class("pill")
         done_btn.add_css_class("suggested-action")

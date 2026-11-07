@@ -37,11 +37,24 @@ jobs:
             mtools \
             dosfstools \
             git \
-            ca-certificates
+            ca-certificates \
+            age
+
+      - name: Validate build inputs
+        run: |
+          sed -i 's/^Components: main$/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
+          apt-get update -qq
+          bash scripts/validate-build.sh --check-apt
+          bash scripts/test-installer-preflight.sh
+          bash scripts/test-update-rollback.sh
+          bash scripts/test-backup-safety.sh
+          bash scripts/test-backup-roundtrip.sh
 
       - name: Build ISO
         shell: bash
-        run: bash build.sh --architectures amd64 2>&1 | tee /tmp/bastille-build.log || { tail -20 /tmp/bastille-build.log; exit 1; }
+        run: |
+          set -o pipefail
+          bash build.sh --architectures amd64 2>&1 | tee /tmp/bastille-build.log
 
       - name: Diagnose failed build
         if: failure()

@@ -3,15 +3,25 @@
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-import sys, subprocess
+import sys, subprocess, shutil
 from gi.repository import Gtk, Adw, Gio, Gdk
 
 class PowerMenu(Gtk.Window):
+    def _power(self, action):
+        """Use elogind's D-Bus API when available, then OpenRC fallbacks."""
+        if action == "lock":
+            return ["swaylock"]
+        if action == "suspend":
+            return ["loginctl", "suspend"] if shutil.which("loginctl") else ["rc-service", "acpid", "suspend"]
+        if action == "reboot":
+            return ["reboot"]
+        return ["poweroff"]
+
     ACTIONS = [
-        ("Lock",         "system-lock-screen-symbolic",     ["swaylock"]),
-        ("Suspend",      "weather-clear-night-symbolic",    ["systemctl", "suspend"]),
-        ("Reboot",       "system-reboot-symbolic",          ["systemctl", "reboot"]),
-        ("Power off",    "system-shutdown-symbolic",        ["systemctl", "poweroff"]),
+        ("Lock",         "system-lock-screen-symbolic",     "lock"),
+        ("Suspend",      "weather-clear-night-symbolic",    "suspend"),
+        ("Reboot",       "system-reboot-symbolic",          "reboot"),
+        ("Power off",    "system-shutdown-symbolic",        "poweroff"),
     ]
 
     def __init__(self, app):
@@ -35,7 +45,7 @@ class PowerMenu(Gtk.Window):
         box.set_margin_start(12); box.set_margin_end(12)
         box.set_margin_top(12); box.set_margin_bottom(12)
 
-        for label, icon_name, cmd in self.ACTIONS:
+        for label, icon_name, action in self.ACTIONS:
             btn = Gtk.Button()
             btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             img = Gtk.Image.new_from_icon_name(icon_name)
@@ -45,7 +55,7 @@ class PowerMenu(Gtk.Window):
             lbl.set_hexpand(True)
             btn_box.append(img); btn_box.append(lbl)
             btn.set_child(btn_box)
-            btn.connect("clicked", lambda _, c=cmd: (subprocess.Popen(c), self.close()))
+            btn.connect("clicked", lambda _, a=action: (subprocess.Popen(self._power(a)), self.close()))
             box.append(btn)
 
         self.set_child(box)

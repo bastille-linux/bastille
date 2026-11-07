@@ -17,6 +17,8 @@ chmod +x /etc/init.d/dnscrypt-proxy         || true
 chmod +x /etc/init.d/bastille-tlsdate            || true
 chmod +x /etc/init.d/bastille-tor               || true
 chmod +x /etc/init.d/wg-quick.wg0           || true
+chmod +x /etc/init.d/networkmanager             || true
+chmod +x /etc/init.d/nftables                   || true
 chmod +x /usr/local/sbin/bastille-bfu-poweroff || true
 
 # ── Enable services ───────────────────────────────────────────────────────────
@@ -30,7 +32,8 @@ rc-update add bastille-bluetooth-block boot    || true
 rc-update add bastille-me-neutralize   boot    || true
 rc-update add apparmor            boot    || true
 rc-update add usbguard            default || true
-rc-update add NetworkManager      default || true
+rc-update add networkmanager      default || true
+rc-update add nftables             default || true
 rc-update add seatd               boot    || true
 rc-update add dbus                default || true
 rc-update add elogind             default || true

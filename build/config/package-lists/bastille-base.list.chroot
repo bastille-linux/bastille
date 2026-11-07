@@ -49,9 +49,17 @@ cage
 
 # GPU drivers
 firmware-amd-graphics
+firmware-iwlwifi
+firmware-realtek
+firmware-atheros
+firmware-brcm80211
+firmware-mediatek
+firmware-intel-sound
+firmware-sof-signed
 firmware-misc-nonfree
 mesa-vulkan-drivers
 libgl1-mesa-dri
+xwayland
 
 # Network & VPN
 wireguard-tools
@@ -103,6 +111,7 @@ flatpak
 # Bluetooth tooling for the shell's Bluetooth panel. The service stays off and the radio rfkill-blocked
 # at boot (bastille-bluetooth-block); the user switches it on explicitly.
 bluez
+libspa-0.2-bluetooth
 xdg-desktop-portal
 
 # Utilities
@@ -115,6 +124,11 @@ file
 htop
 lsof
 rfkill
+nvme-cli
+hdparm
+dmidecode
+flashrom
+xprintidle
 python3
 python3-gi
 python3-gi-cairo
@@ -130,6 +144,18 @@ polkitd
 pkexec
 parted
 jq
+fwupd
+
+# Laptop, audio, printing, and scanning support. Bluetooth and webcam access
+# remain explicit user choices through the security settings and rfkill policy.
+power-profiles-daemon
+pavucontrol
+cups
+cups-client
+system-config-printer
+sane-airscan
+ipp-usb
+printer-driver-all
 
 # Fonts & theming
 fonts-dejavu-core
@@ -153,12 +179,11 @@ lxpolkit
 
 # argon2 CLI — PIN key derivation for subsystems
 argon2
-# age encryption, tuigreet greeter and dnscrypt-proxy are all in trixie main
+# age encryption and dnscrypt-proxy are in trixie main
 age
-tuigreet
 dnscrypt-proxy
 
-# Disk installer dependencies (arch-specific grub packages handled by CI workflow strip step)
+# Disk installer dependencies (arch-specific GRUB package handled by the early hook)
 squashfs-tools
 efibootmgr
 
@@ -171,16 +196,11 @@ fastfetch
 # cron (periodic RAM scrub)
 cron
 
-# Installer: GRUB EFI modules for the running architecture. Only the -bin
-# package is installed: its postinst does not try to touch this image's disk.
+# Installer: common GRUB support. The architecture-specific EFI module is
+# installed by 0005-bastille-architecture-packages.hook.chroot so amd64 and
+# arm64 builds never ask apt to resolve the other architecture's package.
 grub-common
 grub2-common
-#if ARCHITECTURES amd64
-grub-efi-amd64-bin
-#endif
-#if ARCHITECTURES arm64
-grub-efi-arm64-bin
-#endif
 
 # Bastille shell (menu bar, dock, launcher, notification/control centre)
 gir1.2-gtk4layershell-1.0

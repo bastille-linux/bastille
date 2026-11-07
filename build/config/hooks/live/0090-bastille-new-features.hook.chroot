@@ -46,6 +46,7 @@ chmod 0644 /etc/nftables/bastille-offline.nft
 mkdir -p /usr/local/src/bastille-persist
 install -m 0755 /usr/local/src/bastille-persist/bastille-persist-setup \
     /usr/local/bin/bastille-persist-setup
+chmod 0755 /usr/local/bin/bastille-backup
 
 # ── Wipe scripts ──────────────────────────────────────────────────────────
 
@@ -103,8 +104,9 @@ command_args="watch"
 command_background="yes"
 pidfile="/run/bastille-network-guard.pid"
 depend() {
-    need NetworkManager
-    after NetworkManager dnscrypt-proxy thl-dns-lock wg-quick.wg0
+    need networkmanager
+    need nftables
+    after networkmanager nftables dnscrypt-proxy bastille-dns-lock wg-quick.wg0
 }
 EOF
 chmod +x /etc/init.d/bastille-network-guard
@@ -125,7 +127,9 @@ for f in /sys/kernel/mm/transparent_hugepage/enabled \
 done
 EOF
 chmod +x /etc/local.d/bastille-disable-thp.start
-rc-update add local default || true
+if [ -e /etc/init.d/local ]; then
+    rc-update add local default || true
+fi
 
 # Vision guard — launched by Sway autostart (needs Wayland compositor)
 # Register as a Sway autostart entry so it starts with the user session.

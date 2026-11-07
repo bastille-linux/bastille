@@ -13,4 +13,4 @@ ip link delete wg0 2>/dev/null || true
 find /run/thl -type f -exec shred -uz {} \; 2>/dev/null || true
 
 # Power off — not reboot, not suspend
-systemctl poweroff --force
+poweroff --force

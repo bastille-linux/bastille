@@ -3,10 +3,26 @@
 # Generates the live-build configuration for Modernised THL.
 set -e
 
+# Keep the selected architecture in one place.  The CI and local wrappers pass
+# --architectures explicitly; when invoked directly, use the host architecture.
+ARCHITECTURES="$(dpkg --print-architecture)"
+ARCH_FROM_ARGS="$(printf '%s\n' "$@" | awk '
+    $0 == "--architectures" { getline; print; exit }
+    /^--architectures=/ { sub(/^--architectures=/, ""); print; exit }
+')"
+[ -n "$ARCH_FROM_ARGS" ] && ARCHITECTURES="$ARCH_FROM_ARGS"
+
+case "$ARCHITECTURES" in
+  amd64|arm64) ;;
+  *) echo "Unsupported build architecture: $ARCHITECTURES" >&2; exit 2 ;;
+esac
+
 lb config noauto \
   --distribution trixie \
+  --distribution-chroot trixie \
+  --distribution-binary trixie \
   --initsystem sysvinit \
-  --architectures amd64 \
+  --architectures "$ARCHITECTURES" \
   --binary-images iso-hybrid \
   --bootloader grub-efi \
   --debian-installer none \
@@ -25,6 +41,6 @@ lb config noauto \
   --iso-application "Bastille" \
   --iso-publisher "Bastille Project" \
   --iso-volume "BASTILLE" \
-  --bootappend-live "boot=live components quiet splash username=user persistence persistence-encryption=luks" \
+  --bootappend-live "boot=live components quiet splash username=user net.ifnames=0 biosdevname=0 persistence persistence-encryption=luks" \
   --debootstrap-options "--exclude=systemd-sysv" \
   "${@}"

@@ -33,8 +33,7 @@ _show_prompt() {
 
 # ── SSH brute-force detector ──────────────────────────────────────────────
 _watch_ssh() {
-    journalctl -f -u ssh.service -u sshd.service \
-               --output=cat --no-hostname 2>/dev/null | \
+    tail -F /var/log/auth.log /var/log/secure 2>/dev/null | \
     awk '
     /Failed (password|publickey|none) for/ {
         attempts++
@@ -52,7 +51,7 @@ _watch_ssh() {
 
 # ── Forensic USB tool detector ────────────────────────────────────────────
 _watch_usb() {
-    journalctl -f --output=cat --no-hostname 2>/dev/null | \
+    tail -F /var/log/messages /var/log/syslog 2>/dev/null | \
     grep --line-buffered "thl-usb.*FORENSIC\|thl-usb.*CRIT\|thl-usb.*cellebrite\|thl-usb.*MSAB" | \
     while read -r _line; do
         _show_prompt

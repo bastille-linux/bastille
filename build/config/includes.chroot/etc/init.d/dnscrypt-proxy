@@ -11,9 +11,9 @@ command_user="_dnscrypt-proxy"
 command_background="yes"
 
 depend() {
-    need NetworkManager
-    after NetworkManager nftables
-    before thl-dns-lock wg-quick.wg0 bastille-network-guard
+    need networkmanager
+    after networkmanager nftables
+    before bastille-dns-lock wg-quick.wg0 bastille-network-guard
     use logger
 }
 

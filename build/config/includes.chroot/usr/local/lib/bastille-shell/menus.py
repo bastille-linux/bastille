@@ -78,10 +78,10 @@ class AppleMenu:
         add(self.item("Sleep", self.sleep))
         add(self.item("Restart…", lambda: self.dialog.confirm(
             "Restart now?", "Open apps will be closed and anything unsaved will be lost.", "Restart",
-            lambda: system.spawn(["loginctl", "reboot"]), destructive=True, glyph="restart"), close=True))
+            lambda: system.spawn(["reboot"]), destructive=True, glyph="restart"), close=True))
         add(self.item("Shut Down…", lambda: self.dialog.confirm(
             "Shut down now?", "Open apps will be closed and anything unsaved will be lost.", "Shut Down",
-            lambda: system.spawn(["loginctl", "poweroff"]), destructive=True, glyph="power")))
+            lambda: system.spawn(["poweroff"]), destructive=True, glyph="power")))
         add(sep())
         add(self.item("Lock Screen", lambda: system.spawn(["bastille-lock"]), "Super+Esc"))
         add(self.item(f"Log Out {user}…", lambda: self.dialog.confirm(
@@ -134,7 +134,6 @@ class AppleMenu:
     # ── actions ───────────────────────────────────────────────────────────────
     def sleep(self):
         system.spawn(["swaylock", "-f"])
-        system.spawn(["loginctl", "suspend"])
 
     def about(self):
         d = system.about_info()

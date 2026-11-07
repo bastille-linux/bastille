@@ -13,8 +13,8 @@ ACTION="$2"
 # Allowlist — only permitted services
 case "$SVC" in
     nftables|dnscrypt-proxy|bastille-ramwipe|bastille-bfu-idle|bastille-dsm-watchdog|\
-    bastille-update-check|usbguard|apparmor|NetworkManager|greetd|\
-    thl-bluetooth-block|thl-me-neutralize|thl-dns-lock|thl-ram-scrub|wg-quick.wg0)
+    bastille-update-check|usbguard|apparmor|networkmanager|greetd|\
+    bastille-bluetooth-block|bastille-me-neutralize|bastille-dns-lock|bastille-ram-scrub|wg-quick.wg0)
         : ;;
     *) die "service '$SVC' not in allowlist" ;;
 esac
