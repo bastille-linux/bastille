@@ -348,6 +348,8 @@ def passphrase_strength(pw):
 class State:
     def __init__(self):
         self.disk = None
+        self.hardware_profile = "generic"
+        self.hardware_detected = ""
         self.passphrase = ""
         self.full = ""
         self.username = ""
@@ -407,7 +409,7 @@ APP_NAME.update({a: n for _, items in APP_GROUPS for a, n, *_ in items})
 REQUIRED_NAMES = ", ".join(n for _, n, *_ in REQUIRED_APPS)
 
 NAV = [("Start", [("Welcome", "shield")]),
-       ("Disk", [("Disk", "disk"), ("Encryption", "lock")]),
+       ("Disk", [("Disk", "disk"), ("Hardware", "chip"), ("Encryption", "lock")]),
        ("System", [("User", "user"), ("Profiles", "prof"), ("Online accounts", "acct"), ("Apps", "apps")]),
        ("Security", [("Duress PINs", "pin")]),
        ("Install", [("Review", "list"), ("Install", "down"), ("Done", "ok")])]
@@ -603,6 +605,66 @@ class DiskPage(Page):
 
     def validate(self):
         return None if self.st.disk else "Select a disk to continue."
+
+
+class HardwarePage(Page):
+    title = "Hardware compatibility"
+    sub = "Choose the closest supported hardware family. Bastille records this choice for safe, tested tuning."
+
+    PROFILES = [
+        ("thinkpad", "Lenovo / IBM ThinkPad", "Recommended", "Best-supported laptop family; verify the exact Wi-Fi model.", "gn"),
+        ("windows-uefi", "Modern Windows / UEFI laptop", "Best effort", "For ordinary Intel/AMD laptops sold with Windows.", "bl"),
+        ("intel-mac", "Intel MacBook", "Experimental", "Intel Macs only. T2 Macs and Apple Silicon are not supported yet.", "am"),
+        ("generic", "Other / unknown hardware", "Best effort", "Conservative generic settings; hardware-specific tuning stays disabled.", "pu"),
+    ]
+
+    def build(self):
+        self.card = Card()
+        self.add(section("Hardware family", self.card))
+        self.radios = {}
+        self.group = None
+        for key, name, badge_text, desc, tone in self.PROFILES:
+            radio = Gtk.CheckButton()
+            radio.add_css_class("radio")
+            if self.group is None:
+                self.group = radio
+            else:
+                radio.set_group(self.group)
+            row = Row(name, desc, tone, "chip", [badge(badge_text, "ok" if key == "thinkpad" else "warn"), radio])
+            row.on_click(lambda r=radio: r.set_active(True))
+            radio.connect("toggled", lambda r, k=key: self._pick(k) if r.get_active() else None)
+            self.radios[key] = (radio, row)
+            self.card.append(row)
+        self.detected = label("", "row-desc", wrap=True)
+        self.add(Card(Row("Detection", "Bastille uses the firmware vendor and product name only to suggest a profile.", "bl", "info"), self.detected))
+        self._pick(self.st.hardware_profile)
+
+    def _pick(self, key):
+        self.st.hardware_profile = key
+        for k, (radio, row) in self.radios.items():
+            (row.add_css_class if k == key else row.remove_css_class)("selected")
+            if radio.get_active() != (k == key):
+                radio.set_active(k == key)
+        self.wiz.hint_override = "Hardware profile: " + dict((k, n) for k, n, *_ in self.PROFILES)[key]
+        self.changed()
+
+    def on_show(self):
+        vendor = ""; product = ""
+        for path, target in (("/sys/class/dmi/id/sys_vendor", "vendor"), ("/sys/class/dmi/id/product_name", "product")):
+            try:
+                value = open(path).read().strip()
+            except OSError:
+                value = ""
+            if target == "vendor": vendor = value
+            else: product = value
+        text = " · ".join(v for v in (vendor, product) if v) or "Firmware did not expose a DMI model."
+        self.detected.set_text("Detected: " + text)
+        probe = (vendor + " " + product).lower()
+        suggested = "thinkpad" if "thinkpad" in probe else "intel-mac" if "apple" in probe and "mac" in probe else "windows-uefi" if probe else "generic"
+        self._pick(suggested)
+
+    def validate(self):
+        return self.st.hardware_profile in dict((k, n) for k, n, *_ in self.PROFILES)
 
 
 class EncryptionPage(Page):
@@ -1081,6 +1143,9 @@ class AppsPage(Page):
         self.add(section("Always installed", Card(*[
             Row(name, desc, tone, ic, [badge("Included", "ok")])
             for _, name, desc, tone, ic in REQUIRED_APPS])))
+        self.add(section("Browser choice", Card(
+            Row("Tor Browser", "Optional high-anonymity browser; slower and more isolated.", "pu", "globe", [badge("Optional", "warn")]),
+            Row("LibreWolf / Zen", "Use a normal privacy browser without forcing Tor routing.", "bl", "globe", [badge("Optional", "ok")]))))
         self._btns = {}
         for title, items in APP_GROUPS:
             rows = []
@@ -1121,7 +1186,7 @@ class DuressPage(Page):
         self.entries, self.badges = {}, {}
         rows = []
         for key, name, desc, tone, ic in [
-                ("duress", "Duress PIN", "Wipes keys from RAM, shuts down the VPN and powers off straight away", "rd", "lock"),
+                ("duress", "Duress PIN", "Destroys configured encryption keys, verifies the wipe contract, and powers off", "rd", "lock"),
                 ("fake-duress", "Fake duress PIN",
                  "Looks like a wipe: the screen goes black, then a clean-looking decoy desktop appears", "am", "prof"),
                 ("dsm", "DSM PIN", "The PIN you would give an examiner: a fake lock screen appears when forensic tools or brute-force attacks are detected, and entering it there triggers Device Stress Mode", "pu", "pin")]:
@@ -1143,9 +1208,9 @@ class DuressPage(Page):
                                             None, [self.diff_badge]))))
         self.add(section("Device Stress Mode (DSM)", Card(Row(
             "Permanent, cannot be undone",
-            "When the DSM PIN is entered on the fake lock screen, DSM overwrites the UEFI firmware and "
-            "crypto-erases the NVMe. Restoring the BIOS needs a hardware SPI programmer. Leave this off "
-            "unless you know you need it.", "rd", "warn",
+            "This is separate from the normal Duress PIN. DSM may overwrite UEFI firmware and request "
+            "NVMe crypto-erase; it is hardware-dependent, destructive, and not enabled by ordinary duress. "
+            "Restoring firmware needs a hardware SPI programmer. Leave this off unless you know you need it.", "rd", "warn",
             [badge("Destructive", "crit")]), css="crit")))
 
     def on_show(self):
@@ -1394,10 +1459,10 @@ class InstallWindow(Adw.ApplicationWindow):
         self.hint_override = None
         self.ready = False
 
-        self.pages = [WelcomePage(self), DiskPage(self), EncryptionPage(self), UserPage(self),
+        self.pages = [WelcomePage(self), DiskPage(self), HardwarePage(self), EncryptionPage(self), UserPage(self),
                       ProfilesPage(self), AccountsPage(self), AppsPage(self), DuressPage(self),
                       ReviewPage(self), InstallingPage(self), DonePage(self)]
-        (self.welcome, self.disk_page, self.enc_page, self.user_page, self.profiles_page,
+        (self.welcome, self.disk_page, self.hardware_page, self.enc_page, self.user_page, self.profiles_page,
          self.accounts_page, self.apps_page, self.duress_page, self.review_page,
          self.install_page, self.done_page) = self.pages
         self.idx = 0
@@ -1450,7 +1515,7 @@ class InstallWindow(Adw.ApplicationWindow):
         return p.validate() is None
 
     def _required_pages(self):
-        return [self.disk_page, self.enc_page, self.user_page]
+        return [self.disk_page, self.hardware_page, self.enc_page, self.user_page]
 
     def _build_nav(self):
         while (c := self.nav.get_first_child()) is not None:
@@ -1548,6 +1613,7 @@ class InstallWindow(Adw.ApplicationWindow):
         s = self.state
         return {
             "disk": s.disk["path"], "confirm": s.disk["path"], "passphrase": s.passphrase,
+            "hardware_profile": s.hardware_profile,
             "username": s.username, "fullname": s.full, "password": s.password,
             "hostname": s.hostname, "level": s.level, "profiles": list(s.profiles),
             "fake_duress_target": s.fake_target, "accounts": {k: dict(v) for k, v in s.accounts.items()},

@@ -18,6 +18,8 @@ ALLOWED=(
     "org.onionshare.OnionShare"
     "org.electrum.electrum"
     "com.github.micahflee.torbrowser-launcher"
+    "io.gitlab.librewolf-community"
+    "app.zen_browser.zen"
     "org.gnome.Evince"
     "org.gnome.gedit"
     "org.gnome.Calculator"

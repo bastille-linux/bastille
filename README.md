@@ -12,6 +12,8 @@ Bastille is a live OS designed for people who need genuine security — not secu
 The live image includes the core desktop, Firefox, PipeWire, Bluetooth, broad
 firmware coverage, printing/scanning support, Flatpak, and the Bastille apps.
 The first-boot wizard lets you choose which optional launchers remain enabled.
+Tor Browser is optional; privacy-focused normal browsers such as LibreWolf and
+Zen are allowed through Bastille's curated Flatpak gate without forcing Tor.
 
 ---
 
@@ -85,7 +87,10 @@ disk rather than producing an installation that firmware will not boot.
 The graphical installer creates a GPT layout with a 512 MiB EFI system
 partition, a 1 GiB `/boot`, and a LUKS2-encrypted ext4 root. It installs the
 OpenRC-based system and configures the selected user, profiles, accounts, and
-apps. Recovery entries remain enabled in GRUB.
+apps. The installer records a hardware profile for ThinkPads, modern
+Windows/UEFI laptops, Intel MacBooks, or unknown systems; Intel Mac support is
+experimental and T2/Apple Silicon Macs are not supported yet. Recovery entries
+remain enabled in GRUB.
 
 Installed systems update through signed Debian repositories with:
 
@@ -114,6 +119,13 @@ bastille-backup create /media/user/backup/bastille-home.age
 bastille-backup list /media/user/backup/bastille-home.age
 bastille-backup restore /media/user/backup/bastille-home.age
 ```
+
+Duress protection has two layers. The ordinary Duress PIN destroys configured
+cryptographic key material and powers off; `bastille-duress-verify` audits the
+configuration and required protections without performing a wipe. Device
+Stress Mode (DSM) is separate and explicitly destructive: firmware overwrite
+and storage crypto-erase are hardware-dependent and must not be treated as a
+universal recovery guarantee.
 
 ---
 

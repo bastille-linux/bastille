@@ -97,6 +97,29 @@ APP_DEPS = {
     "weather": ["gir1.2-soup-3.0"],
 }
 
+HARDWARE_PROFILES = {
+    "thinkpad": {
+        "name": "Lenovo / IBM ThinkPad",
+        "support": "recommended",
+        "notes": "Best-supported laptop family; verify the exact Wi-Fi and fingerprint-reader model.",
+    },
+    "windows-uefi": {
+        "name": "Modern Windows / UEFI laptop",
+        "support": "best-effort",
+        "notes": "Designed for ordinary Intel/AMD UEFI laptops; check suspend, Wi-Fi, and firmware support.",
+    },
+    "intel-mac": {
+        "name": "Intel MacBook",
+        "support": "experimental",
+        "notes": "Experimental profile for Intel Macs; T2 Macs and Apple Silicon are not supported yet.",
+    },
+    "generic": {
+        "name": "Other / unknown hardware",
+        "support": "best-effort",
+        "notes": "Uses conservative generic settings and records the hardware for later diagnosis.",
+    },
+}
+
 
 MAIL_PROVIDERS = {
     "gmail.com": ("imap.gmail.com", "smtp.gmail.com"),
@@ -286,6 +309,8 @@ class Installer:
             raise InstallError("invalid hostname")
         if c.get("level", "high") not in LEVELS:
             raise InstallError("invalid security level")
+        if c.get("hardware_profile", "generic") not in HARDWARE_PROFILES:
+            raise InstallError("invalid hardware profile")
         for name in c.get("profiles", []):
             if not PROFILE_RE.match(name):
                 raise InstallError(f"invalid profile name: {name!r}")
@@ -460,6 +485,15 @@ class Installer:
 
         with open(f"{t}/etc/hostname", "w") as f:
             f.write(hostname + "\n")
+
+        # Keep the installer choice explicit and auditable. Hardware profiles
+        # are intentionally data-only for now; device-specific tuning must be
+        # added only after it has been tested on real machines.
+        hardware = HARDWARE_PROFILES[c.get("hardware_profile", "generic")]
+        with open(f"{t}/etc/bastille/hardware-profile", "w") as f:
+            f.write(c.get("hardware_profile", "generic") + "\n")
+        with open(f"{t}/etc/bastille/hardware-profile.json", "w") as f:
+            json.dump({"id": c.get("hardware_profile", "generic"), **hardware}, f, indent=2)
 
         # User account.
         groups = [g for g in USER_GROUPS
@@ -640,6 +674,7 @@ class Installer:
             # Containers (LUKS2 images) are created at first boot, when the
             # user can unlock them with their own PIN.
             "containers_created": False,
+            "duress_policy": "cryptographic-key-destruction",
         }
         with open(f"{t}/etc/bastille/profiles.json", "w") as f:
             _json.dump(profiles, f, indent=2)

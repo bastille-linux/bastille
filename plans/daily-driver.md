@@ -63,3 +63,8 @@ Verification: clean build, static analysis, unit tests, disposable-VM boot tests
 ## Explicit deferrals
 
 Firmware flashing/ME neutralization remains opt-in and hardware-gated; no claim of universal firmware mitigation; no destructive wipe or firmware-bricking behavior is expanded until independently tested.
+
+The installer now records a hardware family profile so support can be tested
+against ThinkPads, modern Windows/UEFI laptops, Intel MacBooks, and unknown
+hardware separately. LibreWolf and Zen are permitted as optional privacy
+browsers; Tor remains an explicit high-anonymity choice rather than a default.

@@ -1,0 +1,40 @@
+#!/bin/sh
+# Verify the cryptographic duress-wipe contract without performing a wipe.
+# This cannot promise recovery is impossible on hostile firmware, SSDs with
+# spare cells, or systems with pre-existing copies of the data.
+set -eu
+
+fail=0
+ok() { printf '%s\n' "[OK] $*"; }
+warn() { printf '%s\n' "[WARN] $*"; }
+bad() { printf '%s\n' "[FAIL] $*" >&2; fail=1; }
+
+[ "$(id -u)" -eq 0 ] && ok "running as root" || bad "must run as root"
+
+conf=/etc/bastille/duress.conf
+[ -f "$conf" ] || bad "$conf is missing"
+if [ -f "$conf" ]; then
+    [ "$(stat -c '%u:%a' "$conf")" = "0:600" ] && ok "duress configuration is root-only" \
+        || bad "duress configuration must be root-owned with mode 0600"
+fi
+
+for tool in cryptsetup shred poweroff; do
+    command -v "$tool" >/dev/null 2>&1 && ok "$tool is available" || bad "$tool is missing"
+done
+
+action=/etc/bastille/actions/wipe-keys.sh
+if [ -e "$action" ]; then
+    [ "$(stat -c '%u' "$action")" = 0 ] && [ -x "$action" ] && ok "wipe action is root-owned and executable" \
+        || bad "wipe action must be root-owned and executable"
+else
+    warn "$action is not installed; configure a key-destruction action before relying on a duress PIN"
+fi
+
+if command -v findmnt >/dev/null 2>&1 && findmnt -rn -T /run/thl -o FSTYPE 2>/dev/null | grep -qx tmpfs; then
+    ok "/run/thl is volatile tmpfs"
+else
+    warn "/run/thl is not confirmed as tmpfs; transient key material may persist longer"
+fi
+
+warn "This verifies the cryptographic wipe contract, not recovery resistance against SSD spare cells or compromised firmware."
+exit "$fail"
