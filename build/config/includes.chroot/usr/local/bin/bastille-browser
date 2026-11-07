@@ -18,6 +18,10 @@ TOR_CTRL_PORT = 9051
 TOR_COOKIE = Path("/var/run/tor/control.authcookie")
 DATA_DIR = Path.home() / ".local/share/bastille-browser"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
+NORMAL_BROWSERS = {
+    "LibreWolf": "io.gitlab.librewolf-community",
+    "Zen": "app.zen_browser.zen",
+}
 
 PRIVACY_CHECKS = [
     ("WebRTC disabled", True),
@@ -43,6 +47,15 @@ def find_tor_browser():
         except Exception:
             pass
     return None
+
+
+def flatpak_installed(app_id):
+    return subprocess.run(["flatpak", "info", "--user", app_id],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def launch_flatpak(app_id):
+    subprocess.Popen(["flatpak", "run", app_id])
 
 
 def get_tor_circuit():
@@ -248,6 +261,24 @@ class BrowserWindow(Adw.ApplicationWindow):
         else:
             self._status_lbl.set_label(f"Found: {tor_path}")
 
+        normal_title = Gtk.Label(label="Normal privacy browsers")
+        normal_title.add_css_class("heading")
+        normal_title.set_halign(Gtk.Align.CENTER)
+        btn_box.append(normal_title)
+        normal_desc = Gtk.Label(label="LibreWolf and Zen do not route traffic through Tor.")
+        normal_desc.add_css_class("caption")
+        normal_desc.add_css_class("dim-label")
+        normal_desc.set_halign(Gtk.Align.CENTER)
+        btn_box.append(normal_desc)
+        for name, app_id in NORMAL_BROWSERS.items():
+            btn = Gtk.Button.new_with_label(name)
+            btn.add_css_class("pill")
+            btn.set_size_request(220, 40)
+            installed = flatpak_installed(app_id)
+            btn.set_label(f"Launch {name}" if installed else f"Install {name}")
+            btn.connect("clicked", lambda _b, n=name, a=app_id: self._normal_browser(n, a, _b))
+            btn_box.append(btn)
+
         # Bookmarks section
         bm_grp = Adw.PreferencesGroup()
         bm_grp.set_title("Bookmarks")
@@ -340,6 +371,25 @@ class BrowserWindow(Adw.ApplicationWindow):
             self._circuit_panel.refresh()
         except Exception as e:
             self._status_lbl.set_label(f"Launch failed: {e}")
+
+    def _normal_browser(self, name, app_id, button):
+        try:
+            if not flatpak_installed(app_id):
+                button.set_sensitive(False)
+                button.set_label(f"Installing {name}…")
+                result = subprocess.run(["flatpak", "install", "--user", "-y", "flathub", app_id],
+                                        capture_output=True, text=True, timeout=300)
+                if result.returncode != 0:
+                    button.set_sensitive(True)
+                    button.set_label(f"Install {name}")
+                    self._status_lbl.set_label(f"Could not install {name}: {result.stderr.strip()[-180:]}")
+                    return
+                button.set_label(f"Launch {name}")
+            launch_flatpak(app_id)
+            self._status_lbl.set_label(f"{name} launched (normal privacy mode; Tor is not used)")
+        except Exception as e:
+            button.set_sensitive(True)
+            self._status_lbl.set_label(f"{name} failed: {e}")
 
 
 class BrowserApp(Adw.Application):
