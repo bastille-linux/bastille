@@ -25,6 +25,7 @@ jobs:
           apt-get update -qq
           apt-get install -y --no-install-recommends \
             bash \
+            python3 \
             live-build \
             debootstrap \
             debian-archive-keyring \
