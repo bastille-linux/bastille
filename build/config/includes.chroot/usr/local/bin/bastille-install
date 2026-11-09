@@ -612,7 +612,7 @@ class HardwarePage(Page):
     sub = "Choose the closest supported hardware family. Bastille records this choice for safe, tested tuning."
 
     PROFILES = [
-        ("thinkpad", "Lenovo / IBM ThinkPad", "Recommended", "Best-supported laptop family; verify the exact Wi-Fi model.", "gn"),
+        ("thinkpad", "Lenovo / IBM ThinkPad", "Recommended", "Includes the T530-era Intel graphics, Wi-Fi, TrackPoint, ACPI, audio, webcam, and battery support; fingerprint readers remain best-effort.", "gn"),
         ("windows-uefi", "Modern Windows / UEFI laptop", "Best effort", "For ordinary Intel/AMD laptops sold with Windows.", "bl"),
         ("intel-mac", "Intel MacBook", "Experimental", "Intel Macs only. T2 Macs and Apple Silicon are not supported yet.", "am"),
         ("generic", "Other / unknown hardware", "Best effort", "Conservative generic settings; hardware-specific tuning stays disabled.", "pu"),

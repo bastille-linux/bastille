@@ -48,6 +48,7 @@ greetd
 cage
 
 # GPU drivers
+intel-microcode
 firmware-amd-graphics
 firmware-iwlwifi
 firmware-realtek
@@ -149,6 +150,10 @@ fwupd
 # Laptop, audio, printing, and scanning support. Bluetooth and webcam access
 # remain explicit user choices through the security settings and rfkill policy.
 power-profiles-daemon
+upower
+acpi
+acpid
+v4l-utils
 pavucontrol
 cups
 cups-client

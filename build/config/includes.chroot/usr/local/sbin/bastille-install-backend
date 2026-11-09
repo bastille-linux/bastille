@@ -101,7 +101,7 @@ HARDWARE_PROFILES = {
     "thinkpad": {
         "name": "Lenovo / IBM ThinkPad",
         "support": "recommended",
-        "notes": "Best-supported laptop family; verify the exact Wi-Fi and fingerprint-reader model.",
+        "notes": "Best-supported laptop family. The photographed T530 is supported with Intel graphics, Intel Wi-Fi firmware, TrackPoint/touchpad input, ACPI hotkeys, suspend-safe defaults, audio, webcam, and battery power management. Fingerprint readers remain best-effort.",
     },
     "windows-uefi": {
         "name": "Modern Windows / UEFI laptop",

@@ -82,6 +82,17 @@ system uses Bastille's removable GRUB path and does not yet ship a Bastille-
 signed boot chain. The installer detects Secure Boot and refuses to erase a
 disk rather than producing an installation that firmware will not boot.
 
+### Lenovo ThinkPad T530
+
+The T530 in the reference hardware photo is an amd64 Ivy Bridge ThinkPad. Use
+the amd64 ISO, boot it in UEFI mode, and select **Lenovo / IBM ThinkPad** in the
+installer. The image includes Intel microcode, Intel Wi-Fi firmware, Intel
+graphics support, ACPI laptop controls, TrackPoint/touchpad input, PipeWire
+audio, webcam tools, and battery/power management. Disable Secure Boot before
+installing; this release uses an unsigned removable GRUB path. If the machine
+has the optional NVIDIA NVS 5400M, leave the firmware on integrated/Optimus
+graphics for the most reliable Wayland session.
+
 ## Installed systems
 
 The graphical installer creates a GPT layout with a 512 MiB EFI system
