@@ -649,18 +649,23 @@ class HardwarePage(Page):
         self.changed()
 
     def on_show(self):
-        vendor = ""; product = ""
-        for path, target in (("/sys/class/dmi/id/sys_vendor", "vendor"), ("/sys/class/dmi/id/product_name", "product")):
+        def dmi(name):
             try:
-                value = open(path).read().strip()
+                return open(f"/sys/class/dmi/id/{name}").read().strip()
             except OSError:
-                value = ""
-            if target == "vendor": vendor = value
-            else: product = value
-        text = " · ".join(v for v in (vendor, product) if v) or "Firmware did not expose a DMI model."
+                return ""
+        # ThinkPads report a machine-type code in product_name ("4384WVG") and the
+        # human model ("ThinkPad T510") in product_version.
+        vendor, product, version = dmi("sys_vendor"), dmi("product_name"), dmi("product_version")
+        text = " · ".join(v for v in (vendor, product, version) if v) or "Firmware did not expose a DMI model."
         self.detected.set_text("Detected: " + text)
-        probe = (vendor + " " + product).lower()
-        suggested = "thinkpad" if "thinkpad" in probe else "intel-mac" if "apple" in probe and "mac" in probe else "windows-uefi" if probe else "generic"
+        if getattr(self, "_suggested", False):
+            return   # keep the user's choice when they come back to this page
+        self._suggested = True
+        probe = " ".join((vendor, product, version)).lower()
+        suggested = ("thinkpad" if "thinkpad" in probe or "ibm" in probe
+                     else "intel-mac" if "apple" in probe
+                     else "windows-uefi" if probe.strip() else "generic")
         self._pick(suggested)
 
     def validate(self):
