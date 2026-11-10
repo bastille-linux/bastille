@@ -13,6 +13,7 @@ PATHS = {
     "volume": "M4 9v6h4l5 4V5L8 9zM16.5 8.5a5 5 0 010 7",
     "mute": "M4 9v6h4l5 4V5L8 9zM17 9l4 6M21 9l-4 6",
     "battery": "M3 8h15v8H3zM21 11v2M6 11v2",
+    "bolt": "M13 3L6 14h5l-1 7 7-11h-5z",
     "bell": "M6 16v-5a6 6 0 1112 0v5l2 2H4zM10 20a2 2 0 004 0",
     "sliders": "M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M8 15v4",
     "sun": "M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5",

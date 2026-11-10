@@ -140,7 +140,13 @@ for_window [app_id="bastille-settings"]     floating enable, resize set 900 620
 for_window [app_id="org.bastilleos.Settings"] floating enable, resize set 980 660
 for_window [app_id="org.bastilleos.Store"]    floating enable, resize set 1040 700
 for_window [app_id="org.bastilleos.Setup"]     floating enable, resize set 700 680
+# Bastille apps float (centred) so double-clicking their top bar can maximise
+# them to the usable screen area without going fullscreen.
+for_window [app_id="org.bastilleos.(Browser|Files|Mail|Calendar|Documents|Maps|Messages|Music|Notes|Presentations|Sheets|Terminal|Weather)"] floating enable, resize set 1000 680, move position center
 for_window [app_id="org.bastilleos.Installer"] fullscreen enable
 for_window [app_id="nm-connection-editor"]  floating enable
 for_window [app_id="pavucontrol"]           floating enable, resize set 500 400
 for_window [app_id="polkit-gnome*"]         floating enable
+
+# ── User input tweaks written by Settings (Keyboard, Mouse & Touchpad) ─────────
+include ~/.config/bastille/*.sway

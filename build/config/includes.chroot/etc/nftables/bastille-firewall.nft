@@ -1,0 +1,36 @@
+#!/usr/sbin/nft -f
+#
+# Bastille standard firewall — used when no WireGuard VPN is configured
+# (/etc/wireguard/wg0.conf absent).  Networking works out of the box:
+#   - inbound is default-deny (only replies, loopback, DHCP and ICMPv6 ND)
+#   - outbound is allowed, except plaintext DNS: all name resolution must go
+#     through the local dnscrypt-proxy stub on 127.0.0.1.
+# Once the user installs /etc/wireguard/wg0.conf the nftables service loads the
+# stricter bastille-killswitch.nft ruleset instead.
+
+flush ruleset
+
+table inet bastille-firewall {
+    chain input {
+        type filter hook input priority filter; policy drop;
+        ct state established,related accept
+        iif lo accept
+        udp sport 67 udp dport 68 accept
+        icmp type { echo-request, destination-unreachable, time-exceeded } limit rate 10/second accept
+        icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert,
+                       nd-router-solicit, nd-router-advert,
+                       destination-unreachable, packet-too-big, time-exceeded } accept
+        drop
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+        oif lo accept
+        oifname != "lo" udp dport 53 drop
+        oifname != "lo" tcp dport 53 drop
+    }
+}

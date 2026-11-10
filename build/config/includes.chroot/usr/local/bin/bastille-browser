@@ -7,6 +7,14 @@ import sys, os, subprocess, json, threading
 from pathlib import Path
 from gi.repository import Gtk, Adw, Gio, GLib
 
+for _p in ("/usr/local/lib/bastille-shell",
+           os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib", "bastille-shell")):
+    if os.path.isdir(_p):
+        sys.path.insert(0, _p)
+import appstyle  # noqa: E402
+import bdesign as bd  # noqa: E402
+import icons  # noqa: E402
+
 APP_ID = "org.bastilleos.Browser"
 TOR_PATHS = [
     Path.home() / ".local/share/torbrowser/tbb/x86_64/tor-browser/Browser/start-tor-browser",
@@ -93,221 +101,170 @@ def get_tor_circuit():
         return None
 
 
-class CircuitPanel(Gtk.Box):
-    def __init__(self):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.add_css_class("card")
-        self.set_margin_start(12); self.set_margin_end(12)
-        self.set_margin_top(4); self.set_margin_bottom(4)
-        self.set_size_request(240, -1)
-
-        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        icon = Gtk.Image.new_from_icon_name("network-vpn-symbolic")
-        lbl = Gtk.Label(label="Tor Circuit")
-        lbl.add_css_class("heading")
-        title_box.append(icon)
-        title_box.append(lbl)
-        self.append(title_box)
-
-        self._nodes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.append(self._nodes_box)
-
-        new_circuit_btn = Gtk.Button.new_with_label("New Circuit")
-        new_circuit_btn.connect("clicked", self._new_circuit)
-        self.append(new_circuit_btn)
-
-        self._loading = Gtk.Label(label="Checking circuit…")
-        self._loading.add_css_class("dim-label")
-        self._loading.add_css_class("caption")
-        self.append(self._loading)
-
-        self.refresh()
-
-    def refresh(self):
-        threading.Thread(target=self._fetch_circuit, daemon=True).start()
-
-    def _fetch_circuit(self):
-        circuits = get_tor_circuit()
-        GLib.idle_add(self._update_circuit, circuits)
-
-    def _update_circuit(self, circuits):
-        while self._nodes_box.get_first_child():
-            self._nodes_box.remove(self._nodes_box.get_first_child())
-        self._loading.set_visible(False)
-
-        if not circuits:
-            row = Gtk.Label(label="No circuit info available\n(Tor control port not accessible)")
-            row.add_css_class("dim-label")
-            row.add_css_class("caption")
-            row.set_wrap(True)
-            self._nodes_box.append(row)
-            return
-
-        labels = ["Entry (Guard)", "Middle", "Exit"]
-        for i, hop in enumerate(circuits[0][:3]):
-            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            box.set_margin_start(4)
-            dot = Gtk.Label(label="●")
-            dot.add_css_class("accent" if i < 2 else "warning")
-            lbl = Gtk.Label(label=f"{labels[i] if i < len(labels) else 'Hop'}: {hop}")
-            lbl.add_css_class("caption")
-            lbl.set_halign(Gtk.Align.START)
-            box.append(dot); box.append(lbl)
-            self._nodes_box.append(box)
+def new_tor_circuit():
+    """Ask the local Tor control port for a fresh circuit (SIGNAL NEWNYM)."""
+    try:
+        import socket
+        s = socket.socket()
+        s.settimeout(3)
+        s.connect(("127.0.0.1", TOR_CTRL_PORT))
+        if TOR_COOKIE.exists():
+            auth = b"AUTHENTICATE " + TOR_COOKIE.read_bytes().hex().encode() + b"\r\n"
+        else:
+            auth = b"AUTHENTICATE\r\n"
+        s.sendall(auth)
+        s.recv(256)
+        s.sendall(b"SIGNAL NEWNYM\r\n")
+        s.close()
+        return True
+    except Exception:
         return False
 
-    def _new_circuit(self, *_):
-        try:
-            import socket
-            s = socket.socket()
-            s.settimeout(3)
-            s.connect(("127.0.0.1", TOR_CTRL_PORT))
-            if TOR_COOKIE.exists():
-                auth = b"AUTHENTICATE " + TOR_COOKIE.read_bytes().hex().encode() + b"\r\n"
-            else:
-                auth = b"AUTHENTICATE\r\n"
-            s.sendall(auth)
-            s.recv(256)
-            s.sendall(b"SIGNAL NEWNYM\r\n")
-            s.close()
-        except Exception:
-            pass
-        GLib.timeout_add(2000, self.refresh)
+
+NAV = [("Browsers", "globe"), ("Privacy", "shield"), ("Tor Circuit", "vpn"), ("Bookmarks", "folder")]
 
 
 class BrowserWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
+        self.add_css_class("bapp")
+        self.add_css_class("b2")
         self.set_title("Browser")
-        self.set_default_size(800, 580)
+        self.set_default_size(960, 640)
         self._tor_proc = None
         self._bookmarks = self._load_bookmarks()
+        try:    # double-click the top bar to maximise (fill the screen without fullscreen)
+            bd.enable_maximize(self)
+        except Exception:  # noqa: BLE001
+            pass
 
-        split = Adw.NavigationSplitView()
-        split.set_min_sidebar_width(260)
-        split.set_max_sidebar_width(300)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        handle = Gtk.WindowHandle()
+        bar = Gtk.CenterBox()
+        bar.add_css_class("b2-titlebar")
+        lights = appstyle.traffic_lights()
+        lights.set_margin_start(14)
+        bar.set_start_widget(lights)
+        title = Gtk.Label(label="Browser")
+        title.add_css_class("b2-title")
+        bar.set_center_widget(title)
+        handle.set_child(bar)
+        outer.append(handle)
 
-        # Sidebar
-        sidebar_nav = Adw.NavigationPage()
-        sidebar_nav.set_title("Browser")
-        sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        hdr = Adw.HeaderBar()
-        hdr.set_title_widget(Adw.WindowTitle.new("Bastille Browser", ""))
-        sidebar_box.append(hdr)
+        body = Gtk.Box(vexpand=True)
+        side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        side.add_css_class("b2-nav")
+        side.set_size_request(210, -1)
+        side.append(Gtk.Label(label="PRIVATE BROWSING", xalign=0, css_classes=["b2-navlabel"]))
+        self.nav = Gtk.ListBox()
+        self.nav.add_css_class("navigation-sidebar")
+        self.nav.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.nav.connect("row-selected", self._on_nav)
+        for name, glyph in NAV:
+            row = Gtk.ListBoxRow()
+            row.add_css_class("b2-navitem")
+            box = Gtk.Box(spacing=9)
+            for m in ("start", "end"):
+                getattr(box, f"set_margin_{m}")(10)
+            box.set_margin_top(7)
+            box.set_margin_bottom(7)
+            box.append(icons.icon(glyph, "#898781", 15, 1.9))
+            box.append(Gtk.Label(label=name, xalign=0, hexpand=True))
+            row.set_child(box)
+            row._name = name
+            self.nav.append(row)
+        side.append(self.nav)
+        body.append(side)
 
-        # Privacy status
-        status_grp = Adw.PreferencesGroup()
-        status_grp.set_title("Privacy Status")
-        status_grp.set_margin_start(12); status_grp.set_margin_end(12)
-        status_grp.set_margin_top(8)
-        for label, ok in PRIVACY_CHECKS:
-            row = Adw.ActionRow()
-            row.set_title(label)
-            icon = Gtk.Image.new_from_icon_name("emblem-ok-symbolic" if ok else "dialog-warning-symbolic")
-            row.add_prefix(icon)
-            status_grp.add(row)
-        sidebar_box.append(status_grp)
+        self.stack = Gtk.Stack()
+        self.stack.set_hexpand(True)
+        self.stack.set_vexpand(True)
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.add_named(self._page_browsers(), "Browsers")
+        self.stack.add_named(self._page_privacy(), "Privacy")
+        self.stack.add_named(self._page_circuit(), "Tor Circuit")
+        self.stack.add_named(self._page_bookmarks(), "Bookmarks")
+        body.append(self.stack)
+        outer.append(body)
+        self.set_content(outer)
+        self.nav.select_row(self.nav.get_row_at_index(0))
 
-        # Tor circuit
-        circuit_grp = Adw.PreferencesGroup()
-        circuit_grp.set_title("Tor Circuit")
-        circuit_grp.set_margin_start(12); circuit_grp.set_margin_end(12)
-        circuit_grp.set_margin_top(8)
-        self._circuit_panel = CircuitPanel()
-        circuit_grp.add(self._circuit_panel)
-        sidebar_box.append(circuit_grp)
+    def _on_nav(self, _lb, row):
+        if row is not None:
+            self.stack.set_visible_child_name(row._name)
+            if row._name == "Tor Circuit":
+                self._refresh_circuit()
 
-        sidebar_nav.set_child(sidebar_box)
-
-        # Content pane
-        content_nav = Adw.NavigationPage()
-        content_nav.set_title("Launch")
-        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        content_hdr = Adw.HeaderBar()
-        content_hdr.set_title_widget(Adw.WindowTitle.new("Bastille Browser", "Privacy by default"))
-        refresh_btn = Gtk.Button()
-        refresh_btn.set_icon_name("view-refresh-symbolic")
-        refresh_btn.set_tooltip_text("Refresh circuit info")
-        refresh_btn.connect("clicked", lambda _: self._circuit_panel.refresh())
-        content_hdr.pack_end(refresh_btn)
-        content_box.append(content_hdr)
-
-        # Launch panel
-        launch_page = Adw.StatusPage()
-        launch_page.set_icon_name("security-high-symbolic")
-        launch_page.set_title("Bastille Browser")
-        launch_page.set_description(
-            "A Tor Browser wrapper with integrated circuit monitoring\n"
-            "and privacy controls. All traffic is routed through Tor.")
-        launch_page.set_vexpand(True)
-
-        btn_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        btn_box.set_halign(Gtk.Align.CENTER)
-
-        launch_btn = Gtk.Button.new_with_label("Launch Tor Browser")
-        launch_btn.add_css_class("suggested-action")
-        launch_btn.add_css_class("pill")
-        launch_btn.set_size_request(220, 48)
-        launch_btn.connect("clicked", self._launch_tor)
-
-        self._status_lbl = Gtk.Label(label="")
-        self._status_lbl.add_css_class("caption")
-        self._status_lbl.add_css_class("dim-label")
-
+    # ── Browsers ──────────────────────────────────────────────────────────────
+    def _page_browsers(self):
+        page = bd.Page("Browsers", "Launch a browser. Tor Browser routes everything through Tor; the others do not.")
         tor_path = find_tor_browser()
-        if not tor_path:
-            launch_btn.set_sensitive(False)
-            self._status_lbl.set_label("Tor Browser not found. Install with: torbrowser-launcher")
-        else:
-            self._status_lbl.set_label(f"Found: {tor_path}")
-
-        normal_title = Gtk.Label(label="Normal privacy browsers")
-        normal_title.add_css_class("heading")
-        normal_title.set_halign(Gtk.Align.CENTER)
-        btn_box.append(normal_title)
-        normal_desc = Gtk.Label(label="LibreWolf and Zen do not route traffic through Tor.")
-        normal_desc.add_css_class("caption")
-        normal_desc.add_css_class("dim-label")
-        normal_desc.set_halign(Gtk.Align.CENTER)
-        btn_box.append(normal_desc)
+        self._tor_btn = bd.button("Launch", self._launch_tor, "pri")
+        self._tor_btn.set_sensitive(bool(tor_path))
+        page.section("Tor", bd.Row("globe", "pu", "Tor Browser",
+                                   tor_path or "Not found — install it with torbrowser-launcher",
+                                   bd.badge("Tor", "run"), self._tor_btn))
+        rows = []
         for name, app_id in NORMAL_BROWSERS.items():
-            btn = Gtk.Button.new_with_label(name)
-            btn.add_css_class("pill")
-            btn.set_size_request(220, 40)
             installed = flatpak_installed(app_id)
-            btn.set_label(f"Launch {name}" if installed else f"Install {name}")
+            btn = bd.button("Launch" if installed else "Install", kind="pri" if installed else "")
             btn.connect("clicked", lambda _b, n=name, a=app_id: self._normal_browser(n, a, _b))
-            btn_box.append(btn)
+            rows.append(bd.Row("globe", "bl", name, "Normal privacy browser — traffic does not use Tor",
+                               bd.badge("Direct", "warn"), btn))
+        page.section("Normal privacy browsers", *rows)
+        self._status = bd.Row("info", "", "Status", "Ready")
+        page.section("", self._status)
+        return page
 
-        # Bookmarks section
-        bm_grp = Adw.PreferencesGroup()
-        bm_grp.set_title("Bookmarks")
-        bm_grp.set_margin_start(12); bm_grp.set_margin_end(12)
-        bm_grp.set_margin_top(12)
-        bm_grp.set_margin_bottom(8)
+    def _say(self, text):
+        self._status.set_desc(text)
 
-        add_bm_row = Adw.ActionRow()
-        add_bm_row.set_title("Add bookmark")
-        add_bm_row.set_activatable(True)
-        add_bm_row.connect("activated", self._add_bookmark)
-        add_bm_icon = Gtk.Image.new_from_icon_name("list-add-symbolic")
-        add_bm_row.add_prefix(add_bm_icon)
-        bm_grp.add(add_bm_row)
+    # ── Privacy ───────────────────────────────────────────────────────────────
+    def _page_privacy(self):
+        page = bd.Page("Privacy", "Protections applied by Tor Browser in this configuration")
+        page.section("Tor Browser defaults", *[
+            bd.Row("shield", "gn" if ok else "am", label, "", bd.badge("On" if ok else "Off", "ok" if ok else "warn"))
+            for label, ok in PRIVACY_CHECKS])
+        return page
 
-        self._bm_group = bm_grp
+    # ── Tor circuit ───────────────────────────────────────────────────────────
+    def _page_circuit(self):
+        page = bd.Page("Tor Circuit", "The three relays your Tor traffic currently passes through")
+        self._circuit_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        page.add(self._circuit_box)
+        return page
+
+    def _refresh_circuit(self):
+        bd.bg(get_tor_circuit, self._show_circuit)
+
+    def _show_circuit(self, circuits):
+        c = self._circuit_box.get_first_child()
+        while c:
+            self._circuit_box.remove(c)
+            c = self._circuit_box.get_first_child()
+        labels = ["Entry (guard)", "Middle", "Exit"]
+        if circuits:
+            rows = [bd.Row("vpn", "pu" if i == 2 else "bl", labels[i], hop) for i, hop in enumerate(circuits[0][:3])]
+        else:
+            rows = [bd.Row("info", "am", "No circuit information",
+                           "Tor is not running, or its control port is not accessible")]
+        self._circuit_box.append(bd.section("Current circuit", *rows))
+        new = bd.button("New circuit", lambda: bd.bg(new_tor_circuit, lambda ok: (
+            self._say("Requested a new Tor circuit" if ok else "Could not reach the Tor control port"),
+            GLib.timeout_add(2000, lambda: (self._refresh_circuit(), False)[1]))))
+        refresh = bd.button("Refresh", self._refresh_circuit)
+        act = Gtk.Box(spacing=8)
+        act.append(new)
+        act.append(refresh)
+        self._circuit_box.append(act)
+
+    # ── Bookmarks ─────────────────────────────────────────────────────────────
+    def _page_bookmarks(self):
+        self._bm_page = bd.Page("Bookmarks", "Open a bookmark in Tor Browser")
+        self._bm_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        self._bm_page.add(self._bm_box)
         self._refresh_bookmarks()
-
-        btn_box.append(launch_btn)
-        btn_box.append(self._status_lbl)
-        launch_page.set_child(btn_box)
-
-        content_box.append(launch_page)
-        content_box.append(bm_grp)
-        content_nav.set_child(content_box)
-
-        split.set_sidebar(sidebar_nav)
-        split.set_content(content_nav)
-        self.set_content(split)
+        return self._bm_page
 
     def _load_bookmarks(self):
         try:
@@ -326,14 +283,23 @@ class BrowserWindow(Adw.ApplicationWindow):
             json.dump(self._bookmarks, f, indent=2)
 
     def _refresh_bookmarks(self):
+        c = self._bm_box.get_first_child()
+        while c:
+            self._bm_box.remove(c)
+            c = self._bm_box.get_first_child()
+        rows = []
         for bm in self._bookmarks:
-            row = Adw.ActionRow()
-            row.set_title(bm.get("title", bm["url"]))
-            row.set_subtitle(bm["url"])
-            row.set_activatable(True)
             url = bm["url"]
-            row.connect("activated", lambda _, u=url: self._open_url(u))
-            self._bm_group.add(row)
+            rm = bd.button("Remove", lambda b=bm: self._remove_bookmark(b), "dng")
+            rows.append(bd.Row("globe", "bl", bm.get("title", url), url, rm, on_click=lambda u=url: self._open_url(u)))
+        self._bm_box.append(bd.section("Saved", *(rows or [bd.Row("folder", "", "No bookmarks yet", "")])))
+        self._bm_box.append(bd.button("Add bookmark", self._add_bookmark, "pri"))
+
+    def _remove_bookmark(self, bm):
+        if bm in self._bookmarks:
+            self._bookmarks.remove(bm)
+            self._save_bookmarks()
+            self._refresh_bookmarks()
 
     def _add_bookmark(self, *_):
         dlg = Adw.MessageDialog.new(self)
@@ -347,19 +313,19 @@ class BrowserWindow(Adw.ApplicationWindow):
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("add", "Add")
         dlg.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+
         def resp(d, r):
             if r == "add" and url_e.get_text():
                 self._bookmarks.append({"title": title_e.get_text() or url_e.get_text(), "url": url_e.get_text()})
                 self._save_bookmarks()
+                self._refresh_bookmarks()
         dlg.connect("response", resp)
         dlg.present()
 
+    # ── launching ─────────────────────────────────────────────────────────────
     def _open_url(self, url: str):
         tor = find_tor_browser()
-        if tor:
-            subprocess.Popen([tor, url])
-        else:
-            subprocess.Popen(["xdg-open", url])
+        subprocess.Popen([tor, url] if tor else ["xdg-open", url])
 
     def _launch_tor(self, *_):
         tor = find_tor_browser()
@@ -367,36 +333,44 @@ class BrowserWindow(Adw.ApplicationWindow):
             return
         try:
             self._tor_proc = subprocess.Popen([tor])
-            self._status_lbl.set_label("Tor Browser launched")
-            self._circuit_panel.refresh()
+            self._say("Tor Browser launched")
         except Exception as e:
-            self._status_lbl.set_label(f"Launch failed: {e}")
+            self._say(f"Launch failed: {e}")
 
     def _normal_browser(self, name, app_id, button):
-        try:
+        def work():
             if not flatpak_installed(app_id):
-                button.set_sensitive(False)
-                button.set_label(f"Installing {name}…")
-                result = subprocess.run(["flatpak", "install", "--user", "-y", "flathub", app_id],
-                                        capture_output=True, text=True, timeout=300)
-                if result.returncode != 0:
-                    button.set_sensitive(True)
-                    button.set_label(f"Install {name}")
-                    self._status_lbl.set_label(f"Could not install {name}: {result.stderr.strip()[-180:]}")
-                    return
-                button.set_label(f"Launch {name}")
+                r = subprocess.run(["flatpak", "install", "--user", "-y", "flathub", app_id],
+                                   capture_output=True, text=True, timeout=300)
+                if r.returncode != 0:
+                    return ("fail", r.stderr.strip()[-180:])
             launch_flatpak(app_id)
-            self._status_lbl.set_label(f"{name} launched (normal privacy mode; Tor is not used)")
-        except Exception as e:
+            return ("ok", "")
+
+        def done(res):
             button.set_sensitive(True)
-            self._status_lbl.set_label(f"{name} failed: {e}")
+            if res and res[0] == "ok":
+                button.set_label("Launch")
+                self._say(f"{name} launched (normal privacy mode; Tor is not used)")
+            else:
+                button.set_label("Install")
+                self._say(f"Could not install {name}: {res[1] if res else 'unknown error'}")
+        button.set_sensitive(False)
+        button.set_label("Installing…" if not flatpak_installed(app_id) else "Launching…")
+        bd.bg(work, done)
 
 
 class BrowserApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
-        self.connect("activate", lambda a: BrowserWindow(a).present())
+        self.connect("activate", self._on_activate)
+
+    def _on_activate(self, app):
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        appstyle.install()
+        bd.install()
+        (app.get_active_window() or BrowserWindow(app)).present()
+
 
 if __name__ == "__main__":
-    Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
     sys.exit(BrowserApp().run(sys.argv))

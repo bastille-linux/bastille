@@ -19,6 +19,8 @@ for _p in ("/usr/local/lib/bastille-shell",
 import appstyle  # noqa: E402  shared Bastille app look
 import icons     # noqa: E402  gradient badges for the sidebar
 import system    # noqa: E402  Wi-Fi / Bluetooth / volume helpers shared with the shell
+import bdesign   # noqa: E402  flat dark design kit (Settings mockup look)
+import bset_pages as bp  # noqa: E402  pages built on the design kit
 
 APP_ID = "org.bastilleos.Settings"
 VERSION = "1.0.0"
@@ -1393,112 +1395,103 @@ class SoundPage(NetworkListPage):
         self.box.append(g)
 
 
-NAV_ITEMS = [
-    ("You", [
-        ("Users", "avatar-default-symbolic", UsersPage),
-        ("Internet Accounts", "web-browser-symbolic", InternetAccountsPage),
+NAV_ITEMS = [   # (section, [(page name, glyph, page class)])
+    ("System", [
+        ("About", "info", bp.AboutPage),
+        ("Performance", "cpu", bp.PerformancePage),
+        ("Power", "battery", bp.PowerPage),
+        ("Display", "display", DisplaysPage),
+        ("Sound", "volume", SoundPage),
+        ("Printers", "printer", bp.PrintersPage),
+        ("Persistence", "hdd", PersistencePage),
+        ("Kernel & Boot", "gear", KernelBootPage),
     ]),
     ("Security", [
-        ("Privacy & Security", "security-high-symbolic", PrivacySecurityPage),
-        ("Security Pins", "dialog-password-symbolic", SecurityPinsPage),
-        ("Screen Lock & Auth", "input-dialpad-symbolic", ScreenLockPage),
-        ("AppArmor", "security-high-symbolic", AppArmorPage),
-        ("Hardware Security", "emblem-system-symbolic", HardwareSecurityPage),
-        ("Firewall", "network-firewall-symbolic", FirewallPage),
-        ("VPN", "network-vpn-symbolic", VPNPage),
-        ("DNS", "network-server-symbolic", DNSPage),
-        ("Anonymity", "face-uncertain-symbolic", AnonymityPage),
-        ("USB Security", "drive-removable-media-symbolic", USBSecurityPage),
-    ]),
-    ("System", [
-        ("Kernel & Boot", "emblem-system-symbolic", KernelBootPage),
-        ("Disk Encryption", "channel-secure-symbolic", DiskEncryptionPage),
-        ("Updates & Integrity", "software-update-available-symbolic", UpdatesIntegrityPage),
-        ("Appearance", "preferences-desktop-wallpaper-symbolic", AppearancePage),
-        ("Displays", "video-display-symbolic", DisplaysPage),
-        ("Sound", "audio-volume-high-symbolic", SoundPage),
-        ("Keyboard", "input-keyboard-symbolic", None),
-        ("Accessibility", "preferences-desktop-accessibility-symbolic", None),
-        ("Notifications", "notification-symbolic", None),
+        ("Security & Privacy", "shield", bp.SecurityPrivacyPage),
+        ("Security PINs", "key", SecurityPinsPage),
+        ("Screen Lock & Auth", "lock", ScreenLockPage),
+        ("Disk Encryption", "lock", bp.DiskEncryptionPage),
+        ("Key Management", "key", bp.KeyManagementPage),
+        ("AppArmor", "shield", AppArmorPage),
+        ("Firewall", "layers", FirewallPage),
+        ("Audit Log", "bug", bp.AuditLogPage),
     ]),
     ("Network", [
-        ("Wi-Fi", "network-wireless-symbolic", WifiPage),
-        ("Bluetooth", "bluetooth-symbolic", BluetoothPage),
+        ("Wi-Fi & Network", "wifi", WifiPage),
+        ("VPN / WireGuard", "vpn", VPNPage),
+        ("DNS", "globe", DNSPage),
+        ("Tor", "globe", bp.TorPage),
+        ("Anonymity", "face", AnonymityPage),
     ]),
-    ("Storage", [
-        ("Persistence", "drive-harddisk-symbolic", PersistencePage),
-        ("Updates", "software-update-available-symbolic", UpdatesPage),
+    ("Applications", [
+        ("Installed Apps", "apps", ApplicationsPage),
+        ("Flatpak Sandbox", "layers", bp.FlatpakPage),
+        ("Software Updates", "download", UpdatesIntegrityPage),
+        ("Bastille Updates", "refresh", UpdatesPage),
     ]),
-    ("Apps", [
-        ("Applications", "application-x-executable-symbolic", ApplicationsPage),
-        ("Printers & Scanners", "printer-symbolic", None),
+    ("User", [
+        ("Accounts", "user", UsersPage),
+        ("Internet Accounts", "globe", InternetAccountsPage),
+        ("Notifications", "bell", bp.NotificationsPage),
+        ("Language & Region", "globe", bp.LanguagePage),
+        ("Accessibility", "access", bp.AccessibilityPage),
+        ("Appearance", "sparkle", AppearancePage),
+    ]),
+    ("Hardware", [
+        ("USB Devices", "usb", bp.UsbPage),
+        ("USB Security", "usb", USBSecurityPage),
+        ("Hardware Security", "cpu", HardwareSecurityPage),
+        ("Bluetooth", "bt", BluetoothPage),
+        ("Camera & Mic", "camera", bp.CameraMicPage),
+        ("Keyboard", "keyboard", bp.KeyboardPage),
+        ("Mouse & Touchpad", "sliders", bp.MousePage),
     ]),
 ]
 
 
-NAV_STYLE = {   # sidebar badge: glyph, gradient top, gradient bottom
-    "Users": ("user", "#6aa8ff", "#2f63d4"), "Internet Accounts": ("globe", "#4cc3ff", "#1e7fe0"),
-    "Privacy & Security": ("shield", "#5dd68a", "#1d9a52"), "Security Pins": ("key", "#ffb24d", "#e07a10"),
-    "Screen Lock & Auth": ("lock", "#a8aab0", "#5e6066"), "AppArmor": ("shield", "#7b8cff", "#4150d8"),
-    "Hardware Security": ("cpu", "#a8aab0", "#5e6066"), "Firewall": ("layers", "#ff7a6b", "#d6382a"),
-    "VPN": ("vpn", "#5aa0ff", "#2a5fd0"), "DNS": ("globe", "#4cc3ff", "#1e7fe0"),
-    "Anonymity": ("face", "#9b8cff", "#5a45d6"), "USB Security": ("usb", "#ffb24d", "#e07a10"),
-    "Kernel & Boot": ("cpu", "#8d9096", "#4a4d52"), "Disk Encryption": ("lock", "#5dd68a", "#1d9a52"),
-    "Updates & Integrity": ("refresh", "#8d8bff", "#4a43d8"), "Appearance": ("sparkle", "#ff8ad0", "#c83a98"),
-    "Displays": ("display", "#4cc3ff", "#1e7fe0"), "Sound": ("speaker", "#ff6a82", "#d01f45"),
-    "Keyboard": ("keyboard", "#a8aab0", "#5e6066"), "Accessibility": ("access", "#4cc3ff", "#1e7fe0"),
-    "Notifications": ("bell", "#ff6a6a", "#d62d2d"), "Wi-Fi": ("wifi", "#4cc3ff", "#1e7fe0"),
-    "Bluetooth": ("bt", "#5aa0ff", "#2a5fd0"), "Persistence": ("hdd", "#a8aab0", "#5e6066"),
-    "Updates": ("download", "#8d8bff", "#4a43d8"), "Applications": ("apps", "#ffb24d", "#e07a10"),
-    "Printers & Scanners": ("printer", "#a8aab0", "#5e6066"),
-}
-
-
 class BastilleSettings(Adw.ApplicationWindow):
-    """Bastille System Settings: translucent sidebar with gradient badges, large page titles, crossfading pages."""
+    """Bastille Settings: flat dark sidebar of categories on the left, one page per category on the right."""
 
     def __init__(self, app):
         super().__init__(application=app)
         self.add_css_class("bapp")
+        self.add_css_class("b2")
         self.set_title("Settings")
-        self.set_default_size(980, 660)
+        self.set_default_size(1024, 680)
         self._rows = {}
+        try:    # double-click the top bar to maximise (fill the screen without fullscreen)
+            import sys as _sys
+            _sys.path.insert(0, "/usr/local/lib/bastille-shell")
+            import bdesign as _bdesign
+            _bdesign.enable_maximize(self)
+        except Exception:  # noqa: BLE001
+            pass
 
-        root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        # ── title bar: traffic lights + centred title (drag handle) ──
+        handle = Gtk.WindowHandle()
+        bar = Gtk.CenterBox()
+        bar.add_css_class("b2-titlebar")
+        lights = appstyle.traffic_lights()
+        lights.set_margin_start(14)
+        bar.set_start_widget(lights)
+        title = Gtk.Label(label="Settings")
+        title.add_css_class("b2-title")
+        bar.set_center_widget(title)
+        handle.set_child(bar)
+        outer.append(handle)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
 
         # ── sidebar ──
         side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        side.add_css_class("bsidebar")
-        side.set_size_request(268, -1)
-        handle = Gtk.WindowHandle()
-        top = Gtk.Box()
-        top.set_margin_start(14)
-        top.set_margin_top(14)
-        top.set_margin_bottom(8)
-        top.append(appstyle.traffic_lights())
-        handle.set_child(top)
-        side.append(handle)
-
-        user = GLib.get_real_name()
-        if not user or user == "Unknown":
-            user = GLib.get_user_name()
-        card = Gtk.Box(spacing=10)
-        card.add_css_class("usercard")
-        card.append(icons.badge("shield", "#4f8fd4", "#1f4f93", 44, 48))
-        who = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
-        who.append(Gtk.Label(label=user, xalign=0, css_classes=["heading"]))
-        sub = Gtk.Label(label="Bastille OS", xalign=0)
-        sub.add_css_class("dim")
-        who.append(sub)
-        card.append(who)
-        side.append(card)
-
+        side.add_css_class("b2-nav")
+        side.set_size_request(232, -1)
         self.search = Gtk.SearchEntry()
-        self.search.set_placeholder_text("Search")
-        self.search.set_margin_start(12)
-        self.search.set_margin_end(12)
-        self.search.set_margin_top(6)
-        self.search.set_margin_bottom(4)
+        self.search.set_placeholder_text("Search settings…")
+        self.search.add_css_class("b2-search")
+        self.search.set_margin_bottom(6)
         side.append(self.search)
 
         scroll = Gtk.ScrolledWindow()
@@ -1506,6 +1499,7 @@ class BastilleSettings(Adw.ApplicationWindow):
         scroll.set_vexpand(True)
         self.nav = Gtk.ListBox()
         self.nav.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.nav.add_css_class("navigation-sidebar")
         self.nav.connect("row-selected", self._on_nav_select)
         self.nav.set_filter_func(self._filter)
         self.search.connect("search-changed", lambda *_: self.nav.invalidate_filter())
@@ -1514,23 +1508,25 @@ class BastilleSettings(Adw.ApplicationWindow):
             hdr.set_selectable(False)
             hdr.set_activatable(False)
             lbl = Gtk.Label(label=section.upper(), xalign=0)
-            lbl.add_css_class("bsection")
+            lbl.add_css_class("b2-navlabel")
             hdr.set_child(lbl)
             hdr._is_header = True
+            hdr._section = section
             self.nav.append(hdr)
-            for name, _icon, page_cls in items:
+            for name, glyph, page_cls in items:
                 row = Gtk.ListBoxRow()
-                box = Gtk.Box(spacing=10)
-                box.set_margin_start(8)
-                box.set_margin_end(8)
-                box.set_margin_top(5)
-                box.set_margin_bottom(5)
-                glyph, c1, c2 = NAV_STYLE.get(name, ("grid", "#8d9096", "#4a4d52"))
-                box.append(icons.badge(glyph, c1, c2, 26))
+                row.add_css_class("b2-navitem")
+                box = Gtk.Box(spacing=9)
+                box.set_margin_start(10)
+                box.set_margin_end(10)
+                box.set_margin_top(7)
+                box.set_margin_bottom(7)
+                box.append(icons.icon(glyph, "#898781", 15, 1.9))
                 box.append(Gtk.Label(label=name, xalign=0, hexpand=True))
                 row.set_child(box)
                 row._page_name = name
                 row._page_cls = page_cls
+                row._section = section
                 self.nav.append(row)
                 self._rows[name] = row
         scroll.set_child(self.nav)
@@ -1538,25 +1534,16 @@ class BastilleSettings(Adw.ApplicationWindow):
         root.append(side)
 
         # ── content ──
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-        content.add_css_class("bcontent")
-        chandle = Gtk.WindowHandle()
-        self.title = Gtk.Label(label="Settings", xalign=0)
-        self.title.add_css_class("pagetitle")
-        self.title.set_margin_start(28)
-        self.title.set_margin_top(22)
-        self.title.set_margin_bottom(6)
-        chandle.set_child(self.title)
-        content.append(chandle)
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        self.stack.set_transition_duration(200)
+        self.stack.set_transition_duration(150)
+        self.stack.set_hexpand(True)
         self.stack.set_vexpand(True)
-        content.append(self.stack)
-        root.append(content)
-        self.set_content(root)
+        root.append(self.stack)
+        outer.append(root)
+        self.set_content(outer)
 
-        first = self._rows.get("Privacy & Security")
+        first = self._rows.get("Security & Privacy")
         if first:
             self.nav.select_row(first)
 
@@ -1564,27 +1551,37 @@ class BastilleSettings(Adw.ApplicationWindow):
         q = self.search.get_text().strip().lower()
         if getattr(row, "_is_header", False):
             return not q
-        return not q or q in getattr(row, "_page_name", "").lower()
+        return not q or q in getattr(row, "_page_name", "").lower() or q in getattr(row, "_section", "").lower()
+
+    @staticmethod
+    def _wrap_legacy(name, page):
+        """Pages not yet rebuilt on the design kit get the same title block as the new ones."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.add_css_class("b2-panel")
+        head = Gtk.Label(label=name, xalign=0)
+        head.add_css_class("b2-panel-title")
+        head.set_margin_start(32)
+        head.set_margin_top(20)
+        head.set_margin_bottom(4)
+        box.append(head)
+        page.set_vexpand(True)
+        box.append(page)
+        return box
 
     def _on_nav_select(self, listbox, row):
         if row is None or not hasattr(row, "_page_cls"):
             return
         name = row._page_name
-        self.title.set_text(name)
         if self.stack.get_child_by_name(name) is None:
-            if row._page_cls is None:
+            try:
+                page = row._page_cls()
+                if not isinstance(page, bdesign.Page):
+                    page = self._wrap_legacy(name, page)
+            except Exception as e:  # a broken page must not take the whole app down
                 page = Adw.StatusPage()
-                page.set_icon_name("preferences-system-symbolic")
-                page.set_title(name)
-                page.set_description("This section is coming soon.")
-            else:
-                try:
-                    page = row._page_cls()
-                except Exception as e:  # a broken page must not take the whole app down
-                    page = Adw.StatusPage()
-                    page.set_icon_name("dialog-error-symbolic")
-                    page.set_title(f"Couldn’t load {name}")
-                    page.set_description(str(e))
+                page.set_icon_name("dialog-error-symbolic")
+                page.set_title(f"Couldn\u2019t load {name}")
+                page.set_description(str(e))
             page.set_vexpand(True)
             self.stack.add_named(page, name)
         self.stack.set_visible_child_name(name)
@@ -1598,6 +1595,7 @@ class BastilleSettingsApp(Adw.Application):
     def _on_activate(self, app):
         Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         appstyle.install()
+        bdesign.install()
         win = app.get_active_window() or BastilleSettings(app)
         win.present()
 

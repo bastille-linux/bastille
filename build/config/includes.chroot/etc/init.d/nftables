@@ -4,6 +4,8 @@
 description="Bastille nftables firewall"
 NFT="/usr/sbin/nft"
 RULES="/etc/nftables.conf"
+KILLSWITCH="/etc/nftables/bastille-killswitch.nft"
+WG_CONF="/etc/wireguard/wg0.conf"
 
 depend() {
     after boot mountall.sh networkmanager
@@ -11,14 +13,19 @@ depend() {
 }
 
 start() {
-    ebegin "Loading Bastille nftables rules"
-    "$NFT" -f "$RULES"
+    rules="$RULES"
+    # Kill switch only when a VPN is actually configured; otherwise every
+    # packet would be dropped and the machine would have no network at all.
+    [ -f "$WG_CONF" ] && rules="$KILLSWITCH"
+    ebegin "Loading Bastille nftables rules ($rules)"
+    "$NFT" -f "$rules"
     eend $?
 }
 
 stop() {
     ebegin "Removing Bastille nftables rules"
-    "$NFT" delete table inet thl 2>/dev/null || true
+    "$NFT" delete table inet bastille-firewall 2>/dev/null || true
+    "$NFT" delete table inet thl-killswitch 2>/dev/null || true
     "$NFT" delete table inet thl-offline 2>/dev/null || true
     eend 0
 }

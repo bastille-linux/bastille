@@ -55,6 +55,13 @@ class EventRow(Adw.ActionRow):
 class CalendarWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
+        try:    # double-click the top bar to maximise (fill the screen without fullscreen)
+            import sys as _sys
+            _sys.path.insert(0, "/usr/local/lib/bastille-shell")
+            import bdesign as _bdesign
+            _bdesign.enable_maximize(self)
+        except Exception:  # noqa: BLE001
+            pass
         self.set_title("Calendar")
         self.set_default_size(860, 580)
         self._events = load_events()

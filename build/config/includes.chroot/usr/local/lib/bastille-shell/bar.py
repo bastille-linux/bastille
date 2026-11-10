@@ -71,19 +71,16 @@ class Bar:
         self.vpn.set_margin_end(6)
         box.append(self.vpn)
         self.vpn.set_visible(False)
-        # status items open the matching page of the control centre
-        self.bt = self.status_button(box, "bt")
-        self.net = self.status_button(box, "wifi")
-        self.vol = self.status_button(box, "main")
-        self.bat = self.status_button(box, "main", spacing=4)
-        self.bt.btn.set_visible(False)
-        self.bat.btn.set_visible(False)
-
+        # One status button: battery (with charging bolt) + the control-centre
+        # sliders.  Wi-Fi, Bluetooth, sound and battery detail all live in the
+        # control centre it opens, instead of separate bar items.
         cc = Gtk.Button()
         cc.add_css_class("barbtn")
-        cc.set_child(icons.icon("sliders", "#f4f6f5", 15))
+        self.cc_inner = Gtk.Box(spacing=6)
+        cc.set_child(self.cc_inner)
         cc.connect("clicked", lambda *_: shell.toggle("control"))
         box.append(cc)
+        self.cc_btn = cc
 
         self.clock = Gtk.Button()
         self.clock.add_css_class("barbtn")
@@ -134,21 +131,25 @@ class Bar:
                 box.remove(c)
                 c = box.get_first_child()
             box.append(widget)
-        put(self.net, icons.icon({"wifi": "wifi", "eth": "eth"}.get(net[0], "wifi"),
-                                 "#f4f6f5" if net[0] != "none" else "#8a8f8c", 15))
-        put(self.vol, icons.icon("mute" if vol[1] else "volume", "#f4f6f5", 15))
-        put(self.bt, icons.icon("bt", "#f4f6f5", 15))
-        self.bt.btn.set_visible(bt == "on")
         self.vpn.set_visible(vpn)
+        c = self.cc_inner.get_first_child()
+        while c:
+            self.cc_inner.remove(c)
+            c = self.cc_inner.get_first_child()
         if bat:
-            row = Gtk.Box(spacing=4)
-            lbl = Gtk.Label(label=f"{bat[0]}%")
-            row.append(lbl)
-            row.append(icons.icon("battery", "#f4f6f5", 17))
-            put(self.bat, row)
-            self.bat.btn.set_visible(True)
-        else:
-            self.bat.btn.set_visible(False)
+            pct, charging = bat
+            row = Gtk.Box(spacing=3)
+            if charging:
+                row.append(icons.icon("bolt", "#5dd68a", 13, 2.0))
+            row.append(Gtk.Label(label=f"{pct}%"))
+            self.cc_inner.append(row)
+        self.cc_inner.append(icons.icon("sliders", "#f4f6f5", 15))
+        wifi = {"wifi": "Wi-Fi", "eth": "Ethernet"}.get(net[0], "Not connected")
+        tip = [wifi, "Bluetooth " + ("on" if bt == "on" else "off"),
+               "Sound muted" if vol[1] else f"Volume {vol[0]}%"]
+        if bat:
+            tip.append(f"Battery {bat[0]}%" + (" (charging)" if bat[1] else ""))
+        self.cc_btn.set_tooltip_text(" · ".join(tip))
         return False
 
 

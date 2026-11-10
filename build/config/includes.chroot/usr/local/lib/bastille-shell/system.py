@@ -327,11 +327,19 @@ def wifi_disconnect():
 
 def battery():
     """(percent, charging) or None when there is no battery."""
+    plugged = False
+    for a in glob.glob("/sys/class/power_supply/A*"):     # AC / ADP1 / ACAD
+        try:
+            plugged = plugged or open(a + "/online").read().strip() == "1"
+        except Exception:  # noqa: BLE001
+            continue
     for d in glob.glob("/sys/class/power_supply/BAT*"):
         try:
             pct = int(open(d + "/capacity").read())
             st = open(d + "/status").read().strip()
-            return pct, st in ("Charging", "Full")
+            # "Charging", "Full", or "Not charging" with the charger connected all
+            # mean mains power is present, so show the charging bolt.
+            return pct, st in ("Charging", "Full") or plugged
         except Exception:  # noqa: BLE001
             continue
     return None

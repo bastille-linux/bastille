@@ -116,23 +116,46 @@ esac
 
 # ── Watch loop ─────────────────────────────────────────────────────────────
 
-log "network guard started (interval=${CHECK_INTERVAL}s)"
+VPN_CONF="/etc/wireguard/wg0.conf"
+
+vpn_required() { [ -f "$VPN_CONF" ]; }
+
+# nmcli connectivity: full | limited | portal | none | unknown
+uplink_state() {
+    command -v nmcli >/dev/null 2>&1 || { echo unknown; return 0; }
+    nmcli -t -f CONNECTIVITY general 2>/dev/null || echo unknown
+}
+
+resolver_locked() {
+    grep -Eq "^[[:space:]]*nameserver[[:space:]]+${DNS_LISTENER//./\\.}([[:space:]]|$)" /etc/resolv.conf
+}
+
+log "network guard started (interval=${CHECK_INTERVAL}s, vpn_required=$(vpn_required && echo yes || echo no))"
 
 while true; do
     FAIL_REASON=""
+    STATE="$(uplink_state)"
 
-    if ! check_vpn; then
-        FAIL_REASON="VPN tunnel down or stale (wg0 no recent handshake)"
-    elif ! check_dns; then
-        FAIL_REASON="DNS not routing through stub resolver"
-    elif ! check_captive_portal; then
-        FAIL_REASON="DNS hijacking or captive portal detected"
-    fi
-
-    if [ -n "$FAIL_REASON" ]; then
-        go_offline "$FAIL_REASON"
-    else
+    # Never block a link that is not up yet: the offline table also drops DHCP,
+    # so blocking on "no connectivity" could never recover by itself.
+    if [ "$STATE" = "none" ]; then
         go_online
+    else
+        if ! resolver_locked; then
+            FAIL_REASON="resolver is not the local dnscrypt-proxy stub"
+        elif vpn_required; then
+            if ! check_vpn; then
+                FAIL_REASON="VPN tunnel down or stale (wg0 no recent handshake)"
+            elif [ "$STATE" = "portal" ]; then
+                FAIL_REASON="captive portal detected while the VPN kill switch is active"
+            fi
+        fi
+
+        if [ -n "$FAIL_REASON" ]; then
+            go_offline "$FAIL_REASON"
+        else
+            go_online
+        fi
     fi
 
     sleep "$CHECK_INTERVAL"
