@@ -36,6 +36,7 @@ import os
 import platform
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 
@@ -163,13 +164,23 @@ class InstallError(Exception):
 
 
 def run(*args, input=None, check=True, env=None):
-    """Run a command, stream its output to the log, raise InstallError on failure."""
+    """Run a command, log it and its full output, raise InstallError on failure.
+
+    Every command is logged as "$ cmd" so the whole install can be pasted to
+    someone (or an AI) for help. Secrets are only ever passed on stdin (input=),
+    never in argv, so the argv is safe to show.
+    """
+    log("$ " + " ".join(shlex.quote(str(a)) for a in args))
     p = subprocess.run(list(args), input=input, text=True, env=env,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out = p.stdout.strip()
     if out:
-        for line in out.splitlines()[-20:]:
+        lines = out.splitlines()
+        if len(lines) > 200:
+            log(f"... ({len(lines) - 200} earlier lines omitted)")
+        for line in lines[-200:]:
             log(line)
+    log(f"-> exit {p.returncode}")
     if check and p.returncode != 0:
         tail = " | ".join(out.splitlines()[-4:]) if out else "no output"
         raise InstallError(f"{args[0]} failed (exit {p.returncode}): {tail}")
@@ -416,6 +427,7 @@ class Installer:
         # unsquashfs only draws its progress bar on a terminal, so give it a pty.
         import pty
         master, slave = pty.openpty()
+        log(f"$ unsquashfs -f -d {TARGET} {self.squashfs}")
         proc = subprocess.Popen(["unsquashfs", "-f", "-d", TARGET, self.squashfs],
                                 stdout=slave, stderr=slave, close_fds=True)
         os.close(slave)

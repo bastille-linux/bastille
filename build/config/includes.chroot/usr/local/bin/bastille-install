@@ -1339,11 +1339,23 @@ class InstallingPage(Page):
                                      wrap_mode=Gtk.WrapMode.WORD_CHAR, left_margin=14, right_margin=14,
                                      top_margin=10, bottom_margin=10)
         self.log_view.add_css_class("row-desc")
-        sw = Gtk.ScrolledWindow(min_content_height=110, max_content_height=160, propagate_natural_height=True)
+        sw = Gtk.ScrolledWindow(min_content_height=170, max_content_height=300, propagate_natural_height=True)
         sw.set_child(self.log_view)
         self.log_sw = sw
-        self.add(section("Details", Card(sw, css="log")))
+        copy = button("Copy log", small=True)
+        copy.set_halign(Gtk.Align.END)
+        copy.connect("clicked", self._copy_log)
+        self.add(section("Details", Card(sw, css="log"), copy))
         self._current = None
+
+    def _copy_log(self, btn):
+        buf = self.log_view.get_buffer()
+        text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+        err = self.error.get_first_child().desc.get_text() if self.error.get_visible() else ""
+        if err:
+            text += f"\nERROR: {err}\n"
+        Gdk.Display.get_default().get_clipboard().set(text)
+        btn.set_label("Copied")
 
     def reset(self):
         self._current = None
