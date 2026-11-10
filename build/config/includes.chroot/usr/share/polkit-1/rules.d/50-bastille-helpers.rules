@@ -16,6 +16,33 @@ const BASTILLE_HELPERS = [
     "/usr/local/src/bastille-persist/bastille-persist-setup",
 ];
 
+// The live session has no usable password for 'user', so the installer (and
+// reboot/poweroff after it) must not ask for one there. Detected by the live
+// medium being mounted; on an installed system the normal AUTH_SELF applies.
+const LIVE_NOPROMPT = [
+    "/usr/local/sbin/bastille-install-backend",
+    "/sbin/reboot",
+    "/sbin/poweroff",
+];
+
+function isLive() {
+    try {
+        polkit.spawn(["/usr/bin/test", "-d", "/run/live/medium"]);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+polkit.addRule(function(action, subject) {
+    if (action.id !== "org.freedesktop.policykit.exec") return;
+    var prog = action.lookup("program");
+    if (prog && LIVE_NOPROMPT.indexOf(prog) >= 0 &&
+        subject.local === true && subject.active === true && isLive()) {
+        return polkit.Result.YES;
+    }
+});
+
 polkit.addRule(function(action, subject) {
     if (action.id !== "org.freedesktop.policykit.exec") return;
     var prog = action.lookup("program");

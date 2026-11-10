@@ -1323,6 +1323,9 @@ class InstallingPage(Page):
         holder.add_css_class("brow")
         holder.append(top)
         holder.append(self.bar)
+        self.error = Card(Row("The installation failed", "", "rd", "warn", [badge("Error", "crit")]), css="crit")
+        self.error.set_visible(False)
+        self.add(self.error)
         self.add(section("Progress", Card(holder)))
         self.step_rows = {}
         rows = []
@@ -1340,9 +1343,6 @@ class InstallingPage(Page):
         sw.set_child(self.log_view)
         self.log_sw = sw
         self.add(section("Details", Card(sw, css="log")))
-        self.error = Card(Row("The installation failed", "", "rd", "warn", [badge("Error", "crit")]), css="crit")
-        self.error.set_visible(False)
-        self.add(self.error)
         self._current = None
 
     def reset(self):
@@ -1406,6 +1406,7 @@ class InstallingPage(Page):
     def fail(self, msg):
         self.error.get_first_child().desc.set_text(msg)
         self.error.set_visible(True)
+        self.what.set_text("Installation failed")
 
 
 class DonePage(Page):
