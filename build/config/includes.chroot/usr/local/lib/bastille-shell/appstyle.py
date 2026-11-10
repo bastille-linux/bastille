@@ -51,7 +51,7 @@ window.bapp, window.bapp.background {
 /* traffic lights */
 .bapp windowcontrols { padding: 0; }
 .bapp windowcontrols > button, .bapp windowcontrols button.titlebutton {
-    min-width: 12px; min-height: 12px; padding: 0; margin: 0 4px; border-radius: 7px;
+    min-width: 12px; min-height: 12px; padding: 0; margin: 0 4px; border-radius: 50%;
     background-image: none; border: 1px solid rgba(0,0,0,0.25); box-shadow: none; outline: none; }
 .bapp windowcontrols > button > image, .bapp windowcontrols button.titlebutton > image {
     opacity: 0; -gtk-icon-size: 8px; min-width: 0; min-height: 0; margin: 0; padding: 0; }
@@ -136,4 +136,7 @@ def traffic_lights():
     """Window controls on the left, macOS style."""
     wc = Gtk.WindowControls(side=Gtk.PackType.START)
     wc.set_decoration_layout("close,minimize,maximize:")
+    # Without this the buttons are stretched to the full height of the title bar.
+    wc.set_valign(Gtk.Align.CENTER)
+    wc.set_halign(Gtk.Align.START)
     return wc

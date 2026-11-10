@@ -42,6 +42,12 @@ window.b2, window.b2.background, window.bapp.b2 { background: #0b0b0b; color: #f
 .b2 .b2-titlebar { background: #151515; border-bottom: 1px solid rgba(255,255,255,0.10); min-height: 40px; }
 .b2 .b2-title { font-size: 13px; font-weight: 500; color: #898781; }
 
+.b2 windowcontrols { padding: 0; }
+.b2 windowcontrols > button, .b2 windowcontrols button.titlebutton {
+    min-width: 12px; min-height: 12px; padding: 0; margin: 0 4px; border-radius: 50%;
+    background-image: none; border: 1px solid rgba(0,0,0,0.25); box-shadow: none; outline: none; }
+.b2 windowcontrols > button > image, .b2 windowcontrols button.titlebutton > image {
+    opacity: 0; -gtk-icon-size: 8px; min-width: 0; min-height: 0; margin: 0; padding: 0; }
 .b2 windowcontrols > button.close { background: #ff5f57; }
 .b2 windowcontrols > button.minimize { background: #febc2e; }
 .b2 windowcontrols > button.maximize { background: #28c840; }
@@ -207,7 +213,10 @@ def chip(glyph, tone=""):
     box.set_halign(Gtk.Align.CENTER)
     box.set_valign(Gtk.Align.CENTER)
     if icons is not None:
-        box.append(icons.icon(glyph, fg, 15, 1.9))
+        ic = icons.icon(glyph, fg, 15, 1.9)
+        ic.set_hexpand(True)      # a horizontal Box packs at the start; expand so it centres
+        ic.set_vexpand(True)
+        box.append(ic)
     return box
 
 

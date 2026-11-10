@@ -217,3 +217,9 @@ pipewire
 pipewire-pulse
 brightnessctl
 swaybg
+
+# Bastille Browser (WebKitGTK, with its sandbox helpers) and basic media codecs
+gir1.2-webkit-6.0
+bubblewrap
+xdg-dbus-proxy
+gstreamer1.0-plugins-good

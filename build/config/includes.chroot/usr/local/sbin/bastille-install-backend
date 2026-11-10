@@ -89,7 +89,7 @@ PROFILE_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 REQUIRED_APPS = ("settings", "files", "browser", "terminal")   # preinstalled, never removed
 APP_DEPS = {
     "settings": [],
-    "browser": ["tor"],
+    "browser": ["tor", "gir1.2-webkit-6.0", "bubblewrap", "xdg-dbus-proxy"],
     "mail": ["gir1.2-soup-3.0"],
     "messages": [],
     "calendar": [],
