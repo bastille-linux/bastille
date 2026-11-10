@@ -17,6 +17,13 @@ case "$ARCHITECTURES" in
   *) echo "Unsupported build architecture: $ARCHITECTURES" >&2; exit 2 ;;
 esac
 
+# amd64 images must also boot on legacy-BIOS machines (e.g. ThinkPad T510), so
+# ship GRUB for both BIOS (grub-pc) and UEFI.  arm64 has no BIOS firmware.
+case "$ARCHITECTURES" in
+  amd64) BOOTLOADERS="grub-pc,grub-efi" ;;
+  *)     BOOTLOADERS="grub-efi" ;;
+esac
+
 lb config noauto \
   --distribution trixie \
   --distribution-chroot trixie \
@@ -24,7 +31,7 @@ lb config noauto \
   --initsystem sysvinit \
   --architectures "$ARCHITECTURES" \
   --binary-images iso-hybrid \
-  --bootloader grub-efi \
+  --bootloaders "$BOOTLOADERS" \
   --debian-installer none \
   --archive-areas "main contrib non-free non-free-firmware" \
   --mirror-bootstrap "http://deb.debian.org/debian/" \

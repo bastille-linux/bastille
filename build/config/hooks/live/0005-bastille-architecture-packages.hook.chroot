@@ -4,10 +4,12 @@ set -eu
 
 arch="$(dpkg --print-architecture)"
 case "$arch" in
-    amd64) package=grub-efi-amd64-bin ;;
+    amd64) package="grub-efi-amd64-bin grub-pc-bin" ;;
     arm64) package=grub-efi-arm64-bin ;;
     *) echo "[0005] unsupported image architecture: $arch" >&2; exit 2 ;;
 esac
 
 echo "[0005] installing architecture-specific package: $package"
-apt-get install --no-install-recommends --yes "$package"
+# $package may hold several space-separated package names.
+# shellcheck disable=SC2086
+apt-get install --no-install-recommends --yes $package
