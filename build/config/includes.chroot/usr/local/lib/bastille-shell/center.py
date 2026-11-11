@@ -711,9 +711,19 @@ class ControlCenter:
             threading.Thread(target=work, daemon=True).start()
 
         def done(ok, msg):
+            if not ok and msg == "NEED_PASSWORD":
+                msg = "Enter the password"
+                rev.set_reveal_child(True)
+                self._pw_open = rev
+                entry.grab_focus()
+            elif not ok and msg == "Wrong password":
+                rev.set_reveal_child(True)
+                self._pw_open = rev
+                entry.grab_focus()
+            else:
+                self._pw_open = None
             status.set_text("" if ok else (msg or "Could not connect"))
             status.set_visible(not ok)
-            self._pw_open = None
             if ok and self.page == "wifi":
                 self.fill("wifi")
             return False

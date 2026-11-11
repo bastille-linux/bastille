@@ -305,15 +305,45 @@ def wifi_known():
     return known
 
 
+def _nm_message(text):
+    """Turn nmcli's stderr into something a person can act on."""
+    low = text.lower()
+    if "secrets were required" in low or "no secrets" in low or "802-1x" in low and "secret" in low:
+        return "NEED_PASSWORD"
+    if "no network with ssid" in low:
+        return "Network not in range"
+    if "timeout" in low or "timed out" in low:
+        return "Timed out. Check the password and signal"
+    lines = [l for l in text.strip().splitlines() if l.strip() and not l.lower().startswith("hint")]
+    return lines[-1].replace("Error: ", "") if lines else "Could not connect"
+
+
 def wifi_connect(ssid, password=None):
-    """(ok, message). Known networks reuse their saved profile."""
+    """(ok, message). Known networks reuse their saved profile.
+
+    A failed attempt must not leave its half-made profile behind: the next
+    click would then try to bring it up with no password at all and fail with
+    "secrets were required". Message "NEED_PASSWORD" asks the UI for one.
+    """
     try:
-        if password is None and ssid in wifi_known():
-            r = subprocess.run(["nmcli", "connection", "up", "id", ssid], capture_output=True, text=True, timeout=30)
-        else:
-            cmd = ["nmcli", "device", "wifi", "connect", ssid] + (["password", password] if password else [])
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        return r.returncode == 0, (r.stderr or r.stdout).strip().splitlines()[-1] if (r.stderr or r.stdout).strip() else ""
+        known = ssid in wifi_known()
+        if password is None and known:
+            r = subprocess.run(["nmcli", "connection", "up", "id", ssid], capture_output=True, text=True, timeout=45)
+            if r.returncode == 0:
+                return True, ""
+            msg = _nm_message(r.stderr or r.stdout)
+            if msg == "NEED_PASSWORD":
+                subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=10)
+            return False, msg
+        if known:
+            subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=10)
+        cmd = ["nmcli", "device", "wifi", "connect", ssid] + (["password", password] if password else [])
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+        if r.returncode == 0:
+            return True, ""
+        msg = _nm_message(r.stderr or r.stdout)
+        subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=10)
+        return False, ("Wrong password" if msg == "NEED_PASSWORD" and password else msg)
     except Exception as e:  # noqa: BLE001
         return False, str(e)
 

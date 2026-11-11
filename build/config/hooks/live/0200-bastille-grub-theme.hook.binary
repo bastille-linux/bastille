@@ -1,0 +1,110 @@
+#!/bin/sh
+# Bastille boot menu: dark theme, branded entry names, no Debian wording.
+# Runs after live-build has written binary/boot/grub; fails soft (a plain menu
+# is better than a broken image).
+set -u
+B=binary
+[ -d "$B/boot/grub" ] || B=.
+G="$B/boot/grub"
+[ -d "$G" ] || { echo "grub dir not found, skipping theme"; exit 0; }
+
+mkdir -p "$G/bastille"
+cat > "$G/bastille/theme.txt" <<'THEME'
+desktop-color: "#060b22"
+title-text: ""
+terminal-font: "Unifont Regular 16"
+message-font: "Unifont Regular 16"
+message-color: "#9fb0ff"
+message-bg-color: "#060b22"
+
++ label {
+    left = 0
+    top = 12%
+    width = 100%
+    align = "center"
+    text = "B A S T I L L E"
+    font = "Unifont Regular 16"
+    color = "#ffffff"
+}
+
++ label {
+    left = 0
+    top = 12%+28
+    width = 100%
+    align = "center"
+    text = "private by default"
+    font = "Unifont Regular 16"
+    color = "#6f86ff"
+}
+
++ boot_menu {
+    left = 30%
+    top = 30%
+    width = 40%
+    height = 42%
+    item_font = "Unifont Regular 16"
+    item_color = "#9fb0ff"
+    selected_item_font = "Unifont Regular 16"
+    selected_item_color = "#ffffff"
+    item_height = 34
+    item_padding = 12
+    item_spacing = 8
+    icon_width = 0
+    icon_height = 0
+    item_icon_space = 0
+    scrollbar = false
+}
+
++ progress_bar {
+    id = "__timeout__"
+    left = 30%
+    top = 78%
+    width = 40%
+    height = 6
+    fg_color = "#4f6bff"
+    bg_color = "#141c44"
+    border_color = "#141c44"
+    text = ""
+}
+
++ label {
+    left = 0
+    top = 90%
+    width = 100%
+    align = "center"
+    text = "Up/Down choose    Enter boot    E edit    C command line"
+    font = "Unifont Regular 16"
+    color = "#56619a"
+}
+THEME
+
+cat >> "$G/config.cfg" <<'CFG'
+
+# --- Bastille theme ---
+insmod all_video
+insmod gfxterm
+insmod gfxmenu
+insmod png
+if [ -f /boot/grub/unicode.pf2 ]; then loadfont /boot/grub/unicode.pf2; fi
+if [ -f /boot/grub/fonts/unicode.pf2 ]; then loadfont /boot/grub/fonts/unicode.pf2; fi
+set gfxmode=auto
+set gfxpayload=keep
+terminal_output gfxterm
+set theme=/boot/grub/bastille/theme.txt
+set timeout=6
+set color_normal=light-gray/black
+set color_highlight=white/blue
+CFG
+
+# Entry names: drop live-build / Debian wording.
+for f in "$G"/*.cfg; do
+  [ -f "$f" ] || continue
+  sed -i \
+    -e 's/Live system (amd64 fail-safe mode)/Bastille (safe graphics)/' \
+    -e 's/Live system (amd64)/Bastille/' \
+    -e 's/Live system (arm64)/Bastille/' \
+    -e 's/Live system/Bastille/' \
+    -e 's/Debian GNU\/Linux/Bastille/' \
+    "$f"
+done
+exit 0

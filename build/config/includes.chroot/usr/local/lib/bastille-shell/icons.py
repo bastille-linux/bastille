@@ -77,13 +77,13 @@ PATHS = {
 
 # app tile gradients (top, bottom)
 TILES = {
-    "files": ("#58b4ff", "#1f6fe0"), "browser": ("#46dba5", "#0f8f6c"), "terminal": ("#4a4d52", "#1d1f22"),
-    "settings": ("#a8aab0", "#5e6066"), "mail": ("#58b4ff", "#2368e0"), "messages": ("#52dd78", "#14a53c"),
+    "files": ("#4aa8ff", "#1456d6"), "browser": ("#2fe0a0", "#06805f"), "terminal": ("#5a5e66", "#14161a"),
+    "settings": ("#b4b8c2", "#4c5059"), "mail": ("#58b4ff", "#2368e0"), "messages": ("#52dd78", "#14a53c"),
     "notes": ("#ffd84a", "#e8a900"), "calendar": ("#fafafa", "#d6d6d8"), "music": ("#ff6a82", "#d01f45"),
     "weather": ("#62ccfa", "#2a7be4"), "maps": ("#74dc74", "#2a9a4a"), "documents": ("#58a6ff", "#1c5fd6"),
     "sheets": ("#46dc86", "#128a47"), "presentations": ("#ffa94d", "#e0670f"), "install": ("#8a70ff", "#4a35d6"),
     "launcher": ("#6a6e74", "#34373b"), "generic": ("#7b8088", "#4a4e55"),
-    "store": ("#5ac8fa", "#2563e8"), "update": ("#8d8bff", "#4a43d8"), "setup": ("#a8aab0", "#5e6066"),
+    "store": ("#3fb8ff", "#1a4fe0"), "update": ("#8d8bff", "#4a43d8"), "setup": ("#a8aab0", "#5e6066"),
 }
 TILE_GLYPH = {"files": "folder", "browser": "globe", "terminal": "term", "settings": "gear", "mail": "mail",
               "messages": "msg", "notes": "notes", "calendar": "cal", "music": "music", "weather": "cloud",
@@ -129,7 +129,10 @@ def tile(kind, size=52):
            f'<stop offset="1" stop-color="{c2}"/></linearGradient></defs>'
            f'<rect x="2" y="2" width="92" height="92" rx="22" fill="url(#g)"/>'
            f'<rect x="2.5" y="2.5" width="91" height="91" rx="21.5" fill="none" stroke="#ffffff" stroke-opacity="0.28"/>'
-           f'<g transform="translate(24 24) scale(2)" fill="none" stroke="{stroke}" stroke-width="1.7" '
+           f'<rect x="2" y="2" width="92" height="46" rx="22" fill="#ffffff" fill-opacity="0.10"/>'
+           f'<g transform="translate(19.5 21) scale(2.5)" fill="none" stroke="#000000" stroke-opacity="0.28" '
+           f'stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="{glyph}"/></g>'
+           f'<g transform="translate(18 18) scale(2.5)" fill="none" stroke="{stroke}" stroke-width="2.1" '
            f'stroke-linecap="round" stroke-linejoin="round"><path d="{glyph}"/></g></svg>')
     img = Gtk.Image.new_from_paintable(_texture(svg))
     img.set_pixel_size(size)
