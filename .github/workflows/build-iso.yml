@@ -54,9 +54,14 @@ jobs:
       - name: Validate dnscrypt-proxy config
         run: |
           apt-get install -y --no-install-recommends dnscrypt-proxy
-          out="$(dnscrypt-proxy -config build/config/includes.chroot/etc/dnscrypt-proxy/dnscrypt-proxy.toml -check 2>&1 || true)"
+          # dnscrypt-proxy drops to its own user before reading the file, so the
+          # config must sit somewhere that user can read.
+          install -m 644 build/config/includes.chroot/etc/dnscrypt-proxy/dnscrypt-proxy.toml /etc/dnscrypt-proxy/dnscrypt-proxy.toml
+          install -m 644 build/config/includes.chroot/etc/dnscrypt-proxy/blocked-names.txt /etc/dnscrypt-proxy/blocked-names.txt
+          out="$(dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml -check 2>&1 || true)"
           echo "$out"
-          if echo "$out" | grep -qi "unsupported key\|\[FATAL\]"; then
+          # Only fail on a config the daemon rejects, not on sandbox quirks (no network, no /var/log).
+          if echo "$out" | grep -qi "unsupported key\|toml:\|unable to load"; then
             echo "dnscrypt-proxy rejected the shipped config" >&2
             exit 1
           fi
