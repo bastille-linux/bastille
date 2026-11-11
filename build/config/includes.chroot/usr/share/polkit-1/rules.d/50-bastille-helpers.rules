@@ -10,6 +10,7 @@ const BASTILLE_HELPERS = [
     "/usr/local/sbin/bastille-set-wg",
     "/usr/local/sbin/bastille-set-dns",
     "/usr/local/sbin/bastille-update",
+    "/usr/local/sbin/bastille-apps",
     "/usr/local/sbin/bastille-install-backend",
     "/sbin/reboot",
     "/sbin/poweroff",

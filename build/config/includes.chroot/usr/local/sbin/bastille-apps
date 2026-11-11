@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""bastille-apps — fetch, update and remove Bastille apps from github.com/bastille-linux/apps.
+
+The apps repo publishes an index.json:
+    {"version": 1, "apps": {"notes": {"id": "com.bastille.notes", "name": "Notes",
+        "description": "...", "version": "0.1.0", "category": "...",
+        "files": {"main.py": "<sha256>", "icon.svg": "<sha256>"}}}}
+
+Every downloaded file is checked against the sha256 in the index, and main.py must
+compile as Python before it replaces anything. The previous version is kept as
+<file>.previous so a bad update can be rolled back.
+
+Usage (root):
+    bastille-apps list [--json] [--offline]
+    bastille-apps install NAME... | --all   [--root DIR]
+    bastille-apps update  [NAME...]         [--root DIR]
+    bastille-apps remove  NAME...
+    bastille-apps rollback NAME
+Environment: BASTILLE_APPS_BASE overrides the raw-content base URL (tests, mirrors).
+"""
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import sys
+import urllib.request
+
+BASE = os.environ.get(
+    "BASTILLE_APPS_BASE", "https://raw.githubusercontent.com/bastille-linux/apps/main")
+TIMEOUT = 30
+MAX_FILE = 8 * 1024 * 1024
+NAME_OK = set("abcdefghijklmnopqrstuvwxyz0123456789-")
+ICON_DIR = "usr/share/icons/hicolor/scalable/apps"
+STATE = "var/lib/bastille-apps/installed.json"
+DESKTOP = """[Desktop Entry]
+Type=Application
+Name={name}
+Comment={desc}
+Exec=/usr/local/bin/bastille-{app}
+Icon=bastille-{app}
+Terminal=false
+Categories=GTK;
+"""
+
+
+def die(msg, code=1):
+    print(f"bastille-apps: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def fetch(path):
+    url = f"{BASE}/{path}"
+    if not url.startswith("https://") and not os.environ.get("BASTILLE_APPS_BASE"):
+        die("refusing non-https source")
+    req = urllib.request.Request(url, headers={"User-Agent": "bastille-apps"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        data = r.read(MAX_FILE + 1)
+    if len(data) > MAX_FILE:
+        die(f"{path} is too large")
+    return data
+
+
+def load_index():
+    try:
+        idx = json.loads(fetch("index.json"))
+    except Exception as e:  # noqa: BLE001
+        die(f"cannot fetch app index: {e}")
+    apps = idx.get("apps")
+    if idx.get("version") != 1 or not isinstance(apps, dict):
+        die("unsupported app index format")
+    for name, a in apps.items():
+        if not name or set(name) - NAME_OK:
+            die(f"bad app name in index: {name!r}")
+        for fn in a.get("files", {}):
+            if fn not in ("main.py", "icon.svg", "manifest.json"):
+                die(f"unexpected file {fn!r} for {name}")
+    return apps
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_state(root):
+    try:
+        with open(os.path.join(root, STATE)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_state(root, st):
+    p = os.path.join(root, STATE)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p + ".tmp", "w") as f:
+        json.dump(st, f, indent=1, sort_keys=True)
+    os.replace(p + ".tmp", p)
+
+
+def paths(root, app):
+    return {
+        "main.py": os.path.join(root, "usr/local/bin", f"bastille-{app}"),
+        "icon.svg": os.path.join(root, ICON_DIR, f"bastille-{app}.svg"),
+    }
+
+
+def file_sha(p):
+    try:
+        with open(p, "rb") as f:
+            return sha(f.read())
+    except OSError:
+        return None
+
+
+def status(root, app, meta):
+    """installed | outdated | missing"""
+    p = paths(root, app)["main.py"]
+    cur = file_sha(p)
+    if cur is None:
+        return "missing"
+    return "installed" if cur == meta["files"].get("main.py") else "outdated"
+
+
+def put(dest, data, mode):
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if os.path.exists(dest):
+        shutil.copy2(dest, dest + ".previous")
+    tmp = dest + ".new"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.chmod(tmp, mode)
+    os.replace(tmp, dest)
+
+
+def install_one(root, app, meta, st):
+    blobs = {}
+    for fn, want in meta.get("files", {}).items():
+        if fn == "manifest.json":
+            continue
+        data = fetch(f"{app}/{fn}")
+        if sha(data) != want:
+            die(f"{app}/{fn}: checksum mismatch, refusing to install")
+        blobs[fn] = data
+    if "main.py" not in blobs:
+        die(f"{app}: index lists no main.py")
+    try:
+        compile(blobs["main.py"], f"{app}/main.py", "exec")
+    except SyntaxError as e:
+        die(f"{app}: main.py does not compile ({e}), refusing to install")
+    dst = paths(root, app)
+    put(dst["main.py"], blobs["main.py"], 0o755)
+    if "icon.svg" in blobs:
+        put(dst["icon.svg"], blobs["icon.svg"], 0o644)
+    desk = os.path.join(root, "usr/share/applications", f"bastille-{app}.desktop")
+    if not os.path.exists(desk):
+        os.makedirs(os.path.dirname(desk), exist_ok=True)
+        with open(desk, "w") as f:
+            f.write(DESKTOP.format(app=app, name=meta.get("name", app.title()),
+                                   desc=meta.get("description", "")))
+    st[app] = {"version": meta.get("version", ""), "sha256": meta["files"]["main.py"]}
+    print(f"installed {app} {meta.get('version', '')}")
+
+
+def cmd_list(a):
+    root = a.root
+    st = read_state(root)
+    rows = []
+    try:
+        idx = {} if a.offline else load_index()
+    except SystemExit:
+        raise
+    for app, meta in sorted(idx.items()):
+        rows.append({"app": app, "name": meta.get("name", app),
+                     "description": meta.get("description", ""),
+                     "version": meta.get("version", ""),
+                     "category": meta.get("category", ""),
+                     "state": status(root, app, meta)})
+    if a.offline:
+        rows = [{"app": k, "version": v.get("version", ""), "state": "installed"}
+                for k, v in sorted(st.items())]
+    if a.json:
+        print(json.dumps(rows))
+    else:
+        for r in rows:
+            print(f"{r['app']:<14} {r['version']:<8} {r['state']}")
+
+
+def targets(a, idx, default_all=False):
+    if a.all or (default_all and not a.names):
+        return list(idx)
+    for n in a.names:
+        if n not in idx:
+            die(f"unknown app: {n}")
+    return a.names
+
+
+def cmd_install(a):
+    idx = load_index()
+    st = read_state(a.root)
+    names = targets(a, idx)
+    for n in names:
+        install_one(a.root, n, idx[n], st)
+    write_state(a.root, st)
+
+
+def cmd_update(a):
+    idx = load_index()
+    st = read_state(a.root)
+    todo = [n for n in targets(a, idx, default_all=True)
+            if status(a.root, n, idx[n]) == "outdated"]
+    if not todo:
+        print("all apps are up to date")
+    for n in todo:
+        install_one(a.root, n, idx[n], st)
+    write_state(a.root, st)
+
+
+def cmd_remove(a):
+    st = read_state(a.root)
+    for n in a.names:
+        if set(n) - NAME_OK:
+            die(f"bad app name: {n}")
+        for p in list(paths(a.root, n).values()) + [
+                os.path.join(a.root, "usr/share/applications", f"bastille-{n}.desktop")]:
+            for q in (p, p + ".previous"):
+                try:
+                    os.unlink(q)
+                except FileNotFoundError:
+                    pass
+        st.pop(n, None)
+        print(f"removed {n}")
+    write_state(a.root, st)
+
+
+def cmd_rollback(a):
+    n = a.names[0]
+    if set(n) - NAME_OK:
+        die(f"bad app name: {n}")
+    p = paths(a.root, n)["main.py"]
+    if not os.path.exists(p + ".previous"):
+        die(f"no previous version of {n}")
+    os.replace(p + ".previous", p)
+    print(f"rolled back {n}")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="bastille-apps")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name, fn in (("list", cmd_list), ("install", cmd_install), ("update", cmd_update),
+                     ("remove", cmd_remove), ("rollback", cmd_rollback)):
+        p = sub.add_parser(name)
+        p.add_argument("--root", default="/")
+        p.set_defaults(fn=fn)
+        if name == "list":
+            p.add_argument("--json", action="store_true")
+            p.add_argument("--offline", action="store_true")
+        else:
+            p.add_argument("names", nargs="*")
+            if name in ("install", "update"):
+                p.add_argument("--all", action="store_true")
+    a = ap.parse_args()
+    if not hasattr(a, "all"):
+        a.all = False
+    if a.cmd in ("install", "remove", "rollback") and not a.names and not a.all:
+        die(f"{a.cmd}: give at least one app name")
+    if a.cmd != "list" and os.geteuid() != 0 and a.root == "/":
+        die("must run as root")
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main()

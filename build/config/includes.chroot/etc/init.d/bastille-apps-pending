@@ -10,6 +10,10 @@ depend() {
 }
 
 start() {
+    if [ -s /etc/bastille/apps.fetch ] && getent hosts raw.githubusercontent.com >/dev/null 2>&1; then
+        # shellcheck disable=SC2046
+        /usr/local/sbin/bastille-apps install $(cat /etc/bastille/apps.fetch) && rm -f /etc/bastille/apps.fetch
+    fi
     [ -s /etc/bastille/apps.pending ] || return 0
     ebegin "Installing pending Bastille apps"
     # shellcheck disable=SC2046

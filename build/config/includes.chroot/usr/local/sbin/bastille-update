@@ -365,6 +365,7 @@ case "${1:-help}" in
     apply)      cmd_apply ;;
     rollback)   cmd_rollback ;;
     verify)     cmd_verify ;;
+    apps)       /usr/local/sbin/bastille-apps update ;;
     --version)  cmd_version ;;
     help|--help|-h)
         cat <<'EOF'
@@ -375,6 +376,7 @@ Usage:
   bastille-update apply       download, verify SHA256, and install
   bastille-update rollback    restore the previous live image before reboot
   bastille-update verify      print SHA256 of the installed squashfs
+  bastille-update apps        update Bastille apps from bastille-linux/apps (no reboot, no new ISO)
   bastille-update --version   print installed version
 
 Live updates retain the previous bootable squashfs. If the new image does not

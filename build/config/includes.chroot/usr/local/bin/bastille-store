@@ -9,6 +9,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
+import json
 import os
 import re
 import shutil
@@ -211,7 +212,8 @@ class Store(Adw.ApplicationWindow):
 
         self.nav = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.nav.connect("row-selected", self.on_nav)
-        entries = [("Discover", "store", "#5ac8fa", "#2563e8", "discover")]
+        entries = [("Discover", "store", "#5ac8fa", "#2563e8", "discover"),
+                   ("Bastille Apps", "store", "#ff9f5a", "#e0561a", "bastille")]
         sections = [("", entries), ("CATEGORIES", [(n, g, a, b, "cat:" + n) for n, g, a, b in CATEGORIES]),
                     ("LIBRARY", [("Installed", "check", "#5dd68a", "#1d9a52", "installed"),
                                  ("Updates", "refresh", "#8d8bff", "#4a43d8", "updates")])]
@@ -289,6 +291,7 @@ class Store(Adw.ApplicationWindow):
         self.history = []
         key = row._key
         {"discover": lambda: self.show("discover", "Discover", self.page_discover),
+         "bastille": lambda: self.show("bastille", "Bastille Apps", self.page_bastille),
          "installed": lambda: self.show("installed", "Installed", self.page_installed),
          "updates": lambda: self.show("updates", "Updates", self.page_updates)}.get(
             key, lambda: self.show(key, row._title, lambda: self.page_category(row._title)))()
@@ -423,6 +426,98 @@ class Store(Adw.ApplicationWindow):
             group.add(row)
         col.append(group)
         return self.scroller(col)
+
+    # ── Bastille apps (github.com/bastille-linux/apps via bastille-apps) ──────
+    def page_bastille(self):
+        col = self.column()
+        self.bl_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        col.append(self.bl_box)
+        self.bl_busy = getattr(self, "bl_busy", False)
+        self.render_bastille(None)
+        threading.Thread(target=self.bl_load, daemon=True).start()
+        return self.scroller(col)
+
+    def bl_load(self):
+        try:
+            p = subprocess.run(["/usr/local/sbin/bastille-apps", "list", "--json"],
+                               capture_output=True, text=True, timeout=45)
+            rows = json.loads(p.stdout) if p.returncode == 0 else False
+        except Exception:  # noqa: BLE001
+            rows = False
+        GLib.idle_add(self.render_bastille, rows)
+
+    def render_bastille(self, rows):
+        if not hasattr(self, "bl_box"):
+            return False
+        clear(self.bl_box)
+        if rows is None:
+            self.bl_box.append(Adw.StatusPage(icon_name="view-refresh-symbolic", title="Loading Bastille apps…"))
+            return False
+        if rows is False:
+            sp = Adw.StatusPage(icon_name="network-offline-symbolic", title="Couldn’t reach bastille-linux/apps",
+                                description="Check your internet connection and try again.")
+            retry = Gtk.Button(label="Try Again", halign=Gtk.Align.CENTER)
+            retry.add_css_class("pill")
+            retry.connect("clicked", lambda *_: (self.render_bastille(None),
+                                                 threading.Thread(target=self.bl_load, daemon=True).start()))
+            sp.set_child(retry)
+            self.bl_box.append(sp)
+            return False
+        group = Adw.PreferencesGroup(title="Bastille Apps",
+                                     description="Native apps downloaded from github.com/bastille-linux/apps, checksum-verified.")
+        outdated = [r["app"] for r in rows if r["state"] == "outdated"]
+        for r in rows:
+            row = Adw.ActionRow()
+            row.set_title(GLib.markup_escape_text(r["name"]))
+            row.set_subtitle(GLib.markup_escape_text(r["description"] or r["app"]))
+            st = r["state"]
+            btn = Gtk.Button(label={"missing": "Install", "outdated": "Update", "installed": "Reinstall"}[st],
+                             valign=Gtk.Align.CENTER)
+            btn.add_css_class("pill")
+            if st != "installed":
+                btn.add_css_class("suggested-action")
+            btn.connect("clicked", lambda b, a=r["app"]: self.bl_run(["install", a]))
+            row.add_suffix(btn)
+            if st != "missing" and r["app"] not in ("settings", "files", "browser", "terminal"):
+                rm = Gtk.Button(label="Remove", valign=Gtk.Align.CENTER)
+                rm.add_css_class("pill")
+                rm.connect("clicked", lambda b, a=r["app"]: self.bl_run(["remove", a]))
+                row.add_suffix(rm)
+            group.add(row)
+        self.bl_box.append(group)
+        if outdated:
+            btn = Gtk.Button(label=f"Update {len(outdated)} app{'s' if len(outdated) != 1 else ''}", halign=Gtk.Align.END)
+            btn.add_css_class("pill")
+            btn.add_css_class("suggested-action")
+            btn.connect("clicked", lambda *_: self.bl_run(["update"]))
+            self.bl_box.append(btn)
+        return False
+
+    def bl_run(self, args):
+        if self.bl_busy:
+            return
+        self.bl_busy = True
+        self.render_bastille(None)
+
+        def work():
+            try:
+                p = subprocess.run(["pkexec", "/usr/local/sbin/bastille-apps", *args],
+                                   capture_output=True, text=True, timeout=300)
+                ok, msg = p.returncode == 0, (p.stderr or p.stdout).strip().splitlines()[-1:] or [""]
+            except Exception as e:  # noqa: BLE001
+                ok, msg = False, [str(e)]
+            GLib.idle_add(self.bl_done, ok, msg[0])
+            self.bl_load()
+        threading.Thread(target=work, daemon=True).start()
+
+    def bl_done(self, ok, msg):
+        self.bl_busy = False
+        if ok:
+            self.banner.set_revealed(False)
+        else:
+            self.banner.set_title(f"Bastille apps: {msg[:160]}")
+            self.banner.set_revealed(True)
+        return False
 
     def page_updates(self):
         col = self.column()

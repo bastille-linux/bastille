@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Notes
-Comment=Encrypted private notes
-Exec=bastille-notes
-Icon=text-editor-symbolic
-Categories=Utility;

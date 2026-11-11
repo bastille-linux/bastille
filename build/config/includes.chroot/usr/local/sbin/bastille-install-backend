@@ -578,6 +578,29 @@ class Installer:
                     os.unlink(f"{t}/{p}")
                 except FileNotFoundError:
                     pass
+        # Base apps (settings, files, browser, terminal, store) ship in the image; the optional
+        # ones are downloaded from github.com/bastille-linux/apps.
+        fetch_later = False
+        os.makedirs(f"{t}/etc/bastille", exist_ok=True)
+        try:
+            if not chosen:
+                pass
+            elif self.network_up():
+                r = subprocess.run(["/usr/local/sbin/bastille-apps", "install", "--root", t,
+                                    *sorted(chosen)], capture_output=True, text=True, timeout=300)
+                log("apps repo: " + ((r.stdout + r.stderr).strip() or "ok"))
+                if r.returncode:
+                    log("apps repo fetch failed; bastille-apps-pending retries at next boot")
+                    fetch_later = True
+            else:
+                log("no network: bastille-apps-pending fetches the apps once online")
+                fetch_later = True
+        except Exception as e:  # noqa: BLE001
+            log(f"apps repo fetch skipped: {e}")
+            fetch_later = True
+        if fetch_later and chosen:
+            with open(f"{t}/etc/bastille/apps.fetch", "w") as f:
+                f.write("\n".join(chosen) + "\n")
         wanted = sorted({d for a in keep for d in APP_DEPS[a]})
         # Only what is not already in the image (the required apps' deps are baked in).
         deps = [d for d in wanted
