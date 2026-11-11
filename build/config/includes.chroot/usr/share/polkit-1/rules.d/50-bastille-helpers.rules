@@ -20,11 +20,8 @@ const BASTILLE_HELPERS = [
 // The live session has no usable password for 'user', so the installer (and
 // reboot/poweroff after it) must not ask for one there. Detected by the live
 // medium being mounted; on an installed system the normal AUTH_SELF applies.
-const LIVE_NOPROMPT = [
-    "/usr/local/sbin/bastille-install-backend",
-    "/sbin/reboot",
-    "/sbin/poweroff",
-];
+// Every helper is root-equivalent for the live user anyway, so none prompts there.
+const LIVE_NOPROMPT = BASTILLE_HELPERS;
 
 function isLive() {
     try {

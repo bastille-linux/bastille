@@ -51,6 +51,14 @@ jobs:
           bash scripts/test-backup-safety.sh
           bash scripts/test-backup-roundtrip.sh
 
+      - name: Stamp release version
+        run: |
+          # The updater compares /etc/bastille/version with the newest release tag.
+          echo "v0.1.${{ github.run_number }}" > build/config/includes.chroot/etc/bastille/version
+          sed -i "s#^BASTILLE_GITHUB_REPO=.*#BASTILLE_GITHUB_REPO=\"${{ github.repository }}\"#" \
+            build/config/includes.chroot/etc/bastille/update.conf
+          cat build/config/includes.chroot/etc/bastille/version build/config/includes.chroot/etc/bastille/update.conf | head -8
+
       - name: Build ISO
         shell: bash
         run: |

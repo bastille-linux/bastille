@@ -11,7 +11,9 @@ listen_addresses = ['127.0.0.1:53', '[::1]:53']
 max_clients = 250
 
 # Use DoH servers only (no plain DNS fallback)
-server_names = ['cloudflare-security', 'quad9-dnscrypt-ip4-filter-pri', 'nextdns']
+# The two static DoH servers below work without fetching the signed resolver
+# list, so DNS still comes up if the list download is blocked or slow.
+server_names = ['bastille-cloudflare', 'bastille-quad9', 'cloudflare-security', 'quad9-dnscrypt-ip4-filter-pri', 'nextdns']
 
 # Require servers to support DNS-over-HTTPS or DNSCrypt
 require_dnssec = true
@@ -43,3 +45,9 @@ block_ipv6 = false
 [blacklist]
   # Blocked domains list (populated by security profile)
   blocked_names_file = '/etc/dnscrypt-proxy/blocked-names.txt'
+
+[static]
+  [static.'bastille-cloudflare']
+  stamp = 'sdns://AgMAAAAAAAAABzEuMS4xLjEAEmNsb3VkZmxhcmUtZG5zLmNvbQovZG5zLXF1ZXJ5'
+  [static.'bastille-quad9']
+  stamp = 'sdns://AgMAAAAAAAAABzkuOS45LjkADWRucy5xdWFkOS5uZXQKL2Rucy1xdWVyeQ'

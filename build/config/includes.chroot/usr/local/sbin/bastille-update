@@ -21,7 +21,7 @@ set -euo pipefail
 CONF="/etc/bastille/update.conf"
 [ -f "$CONF" ] && source "$CONF"
 
-GITHUB_REPO="${BASTILLE_GITHUB_REPO:-ker0s3ner/bastille}"
+GITHUB_REPO="${BASTILLE_GITHUB_REPO:-bastille-linux/bastille}"
 RELEASE_API="${BASTILLE_RELEASE_API:-https://api.github.com/repos/${GITHUB_REPO}/releases/latest}"
 SHA256SUMS_ASSET_AMD64="${BASTILLE_SHA256SUMS_ASSET_AMD64:-SHA256SUMS-amd64}"
 SHA256SUMS_ASSET_ARM64="${BASTILLE_SHA256SUMS_ASSET_ARM64:-SHA256SUMS-arm64}"
@@ -244,7 +244,7 @@ cmd_version() {
 }
 
 cmd_check() {
-    local installed latest
+    local installed latest newest
     installed="$(installed_version)"
     info "Installed version: $installed"
     info "Checking GitHub for latest release..."
@@ -256,6 +256,21 @@ cmd_check() {
 
     if [ "$installed" = "$latest" ]; then
         info "You are up to date."
+        return 0
+    fi
+
+    # Release tags are vMAJOR.MINOR.BUILD. If the installed version is not one
+    # (a dev or hand-made image), say so rather than guess.
+    case "$installed" in
+        v[0-9]*) ;;
+        *)
+            info "This image has no release version ($installed)."
+            info "Latest release is $latest. Download it to get a stamped build."
+            return 2 ;;
+    esac
+    newest="$(printf '%s\n%s\n' "$installed" "$latest" | sort -V | tail -n1)"
+    if [ "$newest" = "$installed" ]; then
+        info "You are up to date (installed $installed is newer than or equal to $latest)."
         return 0
     fi
 

@@ -812,13 +812,14 @@ class UpdatesPage(Gtk.ScrolledWindow):
 
         r_check = Adw.ActionRow()
         r_check.set_title("Check for updates")
-        r_check.set_subtitle("Queries GitHub Releases API")
+        r_check.set_subtitle("Compares this image with the newest GitHub release")
         r_check.set_activatable(True)
         btn = Gtk.Button.new_with_label("Check now")
         btn.add_css_class("pill")
         btn.set_valign(Gtk.Align.CENTER)
         btn.connect("clicked", lambda _: self._check_update())
         r_check.add_suffix(btn)
+        self._check_btn, self._check_row = btn, r_check
         ug.add(r_check)
 
         r_auto = BastilleRow("Check at boot", "Run bastille-update check on startup",
@@ -829,16 +830,37 @@ class UpdatesPage(Gtk.ScrolledWindow):
         self.set_child(box)
 
     def _check_update(self):
-        try:
-            out = subprocess.check_output(
-                ["bastille-update", "check"], text=True, stderr=subprocess.STDOUT, timeout=30)
-            dlg = Adw.MessageDialog.new(None)
-            dlg.set_heading("Update check")
-            dlg.set_body(out.strip())
+        """Run the (root-only) updater through pkexec off the UI thread and show whatever it says."""
+        import threading
+        self._check_btn.set_sensitive(False)
+        self._check_row.set_subtitle("Checking GitHub…")
+
+        def work():
+            try:
+                r = subprocess.run(["pkexec", "/usr/local/sbin/bastille-update", "check"],
+                                   capture_output=True, text=True, timeout=60)
+                out = ((r.stdout or "") + (r.stderr or "")).replace("bastille-update: ", "").strip()
+                rc = r.returncode
+            except Exception as e:  # noqa: BLE001
+                out, rc = f"Could not run the updater: {e}", 1
+            GLib.idle_add(done, rc, out)
+
+        def done(rc, out):
+            self._check_btn.set_sensitive(True)
+            if rc == 0:
+                headline, sub = "Up to date", "You are running the latest release"
+            elif rc == 2:
+                headline, sub = "Update available", "A newer release is on GitHub"
+            else:
+                headline, sub = "Check failed", "Could not reach GitHub"
+            self._check_row.set_subtitle(sub)
+            dlg = Adw.MessageDialog.new(self.get_root())
+            dlg.set_heading(headline)
+            dlg.set_body(out or "No output from the updater.")
             dlg.add_response("ok", "OK")
             dlg.present()
-        except Exception as e:
-            print(str(e), file=sys.stderr)
+            return False
+        threading.Thread(target=work, daemon=True).start()
 
 
 class ApplicationsPage(Gtk.ScrolledWindow):

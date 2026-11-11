@@ -1,0 +1,11 @@
+#!/bin/sh
+# Launch the Bastille terminal; if it fails to start (crash, missing VTE, GL
+# problem) fall back to foot so a terminal always opens. Output is kept in
+# ~/.cache/bastille-terminal.log for debugging.
+LOG="${XDG_CACHE_HOME:-$HOME/.cache}/bastille-terminal.log"
+mkdir -p "$(dirname "$LOG")" 2>/dev/null
+if bastille-terminal "$@" >>"$LOG" 2>&1; then
+    exit 0
+fi
+echo "$(date +%T) bastille-terminal failed, falling back to foot" >>"$LOG"
+exec foot

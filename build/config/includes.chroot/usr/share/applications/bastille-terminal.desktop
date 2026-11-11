@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Terminal
 Comment=Bastille terminal emulator
-Exec=bastille-terminal
+Exec=bastille-term
 Icon=utilities-terminal-symbolic
 Terminal=false
 Type=Application

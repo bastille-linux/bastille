@@ -573,7 +573,21 @@ class BrowserWindow(Adw.ApplicationWindow):
     def _on_load_failed(self, view, _ev, uri, err, tab):
         if tab.tor and not self.tor.ready:
             return False
-        return False
+        msg = (getattr(err, "message", "") or "").strip()
+        if "cancel" in msg.lower() or not uri or uri.startswith("bastille:"):
+            return False
+        import html as _h
+        page = (
+            "<body style='background:#0b0b0b;color:#f0efec;font:16px system-ui;display:flex;align-items:center;"
+            "justify-content:center;height:100vh;margin:0'><div style='max-width:560px;text-align:center'>"
+            "<h2>Couldn\u2019t load this page</h2>"
+            f"<p style='color:#898781'>{_h.escape(uri)}</p>"
+            f"<p style='color:#f87171'>{_h.escape(msg or 'Unknown network error')}</p>"
+            "<p style='color:#898781;font-size:14px'>If every site fails with a name or resolver error, "
+            "DNS is down: open a terminal and run <code>nslookup duckduckgo.com 127.0.0.1</code>.</p>"
+            f"<p><a style='color:#7ab8f5' href='{_h.escape(uri, quote=True)}'>Try again</a></p></div></body>")
+        view.load_alternate_html(page, uri, None)
+        return True
 
     def _tor_progress(self):
         if self.tor.failed:

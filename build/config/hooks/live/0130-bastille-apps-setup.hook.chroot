@@ -62,13 +62,14 @@ for sbin in \
 done
 
 # ── Bastille config dir ────────────────────────────────────────────────────────
-install -d -m 750 /etc/bastille
+install -d -m 755 /etc/bastille
 chown root:root /etc/bastille
 
 # Create default version file if missing
 if [ ! -f /etc/bastille/version ]; then
     echo "dev-$(date +%Y%m%d)" > /etc/bastille/version
 fi
+chmod 644 /etc/bastille/version /etc/bastille/update.conf 2>/dev/null || true
 
 # ── Sway / Waybar / swaylock — fix home dir ownership ─────────────────────────
 # These configs are laid in as root; chown to 'user' at runtime via login hook
