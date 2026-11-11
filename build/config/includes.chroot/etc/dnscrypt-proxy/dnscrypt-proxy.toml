@@ -5,7 +5,11 @@ bootstrap_resolvers = ['9.9.9.11:53', '149.112.112.11:53', '1.1.1.1:53', '8.8.8.
 ignore_system_dns = true
 netprobe_timeout = 0
 netprobe_address = '9.9.9.9:53'
-listen_addresses = ['127.0.0.1:53', '[::1]:53']
+user_name = '_dnscrypt-proxy'
+log_level = 2
+log_file = '/var/log/dnscrypt-proxy.log'
+# IPv6 is disabled system-wide (sysctl), so binding [::1] would make the daemon exit.
+listen_addresses = ['127.0.0.1:53']
 
 # Maximum simultaneous DNS queries
 max_clients = 250

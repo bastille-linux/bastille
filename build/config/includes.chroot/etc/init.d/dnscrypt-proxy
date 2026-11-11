@@ -7,7 +7,8 @@ description="dnscrypt-proxy encrypted DNS"
 pidfile="/run/dnscrypt-proxy.pid"
 command="/usr/sbin/dnscrypt-proxy"
 command_args="-config /etc/dnscrypt-proxy/dnscrypt-proxy.toml"
-command_user="_dnscrypt-proxy"
+# Started as root: port 53 is privileged. dnscrypt-proxy drops to
+# _dnscrypt-proxy itself right after binding (user_name in the config).
 command_background="yes"
 
 depend() {

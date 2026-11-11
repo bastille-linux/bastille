@@ -318,31 +318,43 @@ def _nm_message(text):
     return lines[-1].replace("Error: ", "") if lines else "Could not connect"
 
 
+def wifi_device():
+    for line in run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device"]).splitlines():
+        dev, _, typ = line.partition(":")
+        if typ == "wifi":
+            return dev
+    return ""
+
+
+def _nm_delete(ssid):
+    subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=10)
+
+
 def wifi_connect(ssid, password=None):
     """(ok, message). Known networks reuse their saved profile.
 
-    A failed attempt must not leave its half-made profile behind: the next
-    click would then try to bring it up with no password at all and fail with
-    "secrets were required". Message "NEED_PASSWORD" asks the UI for one.
+    A failed attempt must not leave its half-made profile behind, and a saved
+    profile that no longer fits this machine (wrong interface, stale key) is
+    dropped and rebuilt from scratch on the real Wi-Fi device.
+    Message "NEED_PASSWORD" asks the UI for one.
     """
     try:
-        known = ssid in wifi_known()
-        if password is None and known:
-            r = subprocess.run(["nmcli", "connection", "up", "id", ssid], capture_output=True, text=True, timeout=45)
+        dev = wifi_device()
+        ifn = ["ifname", dev] if dev else []
+        if password is None and ssid in wifi_known():
+            r = subprocess.run(["nmcli", "connection", "up", "id", ssid] + ifn,
+                               capture_output=True, text=True, timeout=45)
             if r.returncode == 0:
                 return True, ""
-            msg = _nm_message(r.stderr or r.stdout)
-            if msg == "NEED_PASSWORD":
-                subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=10)
-            return False, msg
-        if known:
-            subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=10)
-        cmd = ["nmcli", "device", "wifi", "connect", ssid] + (["password", password] if password else [])
+            _nm_delete(ssid)          # stale or mismatched profile: start clean below
+        elif ssid in wifi_known():
+            _nm_delete(ssid)
+        cmd = ["nmcli", "device", "wifi", "connect", ssid] + (["password", password] if password else []) + ifn
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
         if r.returncode == 0:
             return True, ""
         msg = _nm_message(r.stderr or r.stdout)
-        subprocess.run(["nmcli", "connection", "delete", "id", ssid], capture_output=True, timeout=10)
+        _nm_delete(ssid)
         return False, ("Wrong password" if msg == "NEED_PASSWORD" and password else msg)
     except Exception as e:  # noqa: BLE001
         return False, str(e)

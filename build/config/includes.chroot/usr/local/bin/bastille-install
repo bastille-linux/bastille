@@ -934,7 +934,10 @@ class NetworkPage(Page):
         def work():
             # drop any stale profile first so a wrong password never lingers
             self._nm("connection", "delete", "id", ssid, timeout=10)
-            args = ["device", "wifi", "connect", ssid] + (["password", password] if password else [])
+            _, devs = self._nm("-t", "-f", "DEVICE,TYPE", "device")
+            wdev = next((l.split(":")[0] for l in devs.splitlines() if l.endswith(":wifi")), "")
+            args = (["device", "wifi", "connect", ssid] + (["password", password] if password else [])
+                    + (["ifname", wdev] if wdev else []))
             rc, out = self._nm(*args, timeout=45)
             if rc != 0:
                 self._nm("connection", "delete", "id", ssid, timeout=10)
