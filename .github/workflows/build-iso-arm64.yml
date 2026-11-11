@@ -23,6 +23,7 @@ jobs:
       - name: Install live-build
         run: |
           apt-get update -qq
+          apt-get install -y -qq python3
           apt-get install -y --no-install-recommends \
             bash \
             live-build \
@@ -52,6 +53,7 @@ jobs:
         run: |
           sed -i 's/^Components: main$/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
           apt-get update -qq
+          apt-get install -y -qq python3
           bash scripts/validate-build.sh --check-apt
           bash scripts/test-installer-preflight.sh
           bash scripts/test-update-rollback.sh
