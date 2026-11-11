@@ -1,6 +1,10 @@
 # Bastille OS — dnscrypt-proxy configuration
 # Replaces systemd-resolved; all DNS goes through DoH/DoT with DNSSEC
 
+bootstrap_resolvers = ['9.9.9.11:53', '149.112.112.11:53', '1.1.1.1:53', '8.8.8.8:53']
+ignore_system_dns = true
+netprobe_timeout = 0
+netprobe_address = '9.9.9.9:53'
 listen_addresses = ['127.0.0.1:53', '[::1]:53']
 
 # Maximum simultaneous DNS queries
@@ -27,12 +31,7 @@ block_ipv6 = false
   minisign_key = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
   prefix = ''
 
-[anonymized_dns]
-  # Route queries through relays to hide client IP from resolvers
-  routes = [
-    { server_name='cloudflare-security', via=['anon-cs-amsterdam', 'anon-cs-london'] },
-    { server_name='quad9-dnscrypt-ip4-filter-pri', via=['anon-cs-de', 'anon-cs-nl'] }
-  ]
+# Anonymized DNS relays are off: they need a [sources.relays] list and break startup without one.
 
 [query_log]
   # Disabled — no DNS query logging

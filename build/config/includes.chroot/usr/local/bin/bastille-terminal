@@ -13,7 +13,21 @@ import sys, os
 from gi.repository import Gtk, Adw, Gio, GLib, Gdk
 
 APP_ID = "org.bastilleos.Terminal"
-SHELL = os.environ.get("SHELL", "/bin/bash")
+def _pick_shell():
+    import pwd
+    cands = [os.environ.get("SHELL", "")]
+    try:
+        cands.append(pwd.getpwuid(os.getuid()).pw_shell)
+    except KeyError:
+        pass
+    cands += ["/bin/bash", "/bin/sh"]
+    for c in cands:
+        if c and os.path.isfile(c) and os.access(c, os.X_OK) and "nologin" not in c and not c.endswith("/false"):
+            return c
+    return "/bin/sh"
+
+
+SHELL = _pick_shell()
 
 TERM_CSS = """
 window { background-color: #0b0b0b; }
@@ -57,9 +71,11 @@ class TerminalTab(Gtk.Box):
             sw.set_hexpand(True)
             self.append(sw)
 
+            env = [f"{k}={v}" for k, v in os.environ.items()]
+            env = [e for e in env if not e.startswith("TERM=")] + ["TERM=xterm-256color", "COLORTERM=truecolor"]
             self._vte.spawn_async(
-                Vte.PtyFlags.DEFAULT, None,
-                [SHELL], None,
+                Vte.PtyFlags.DEFAULT, os.path.expanduser("~") if os.path.isdir(os.path.expanduser("~")) else "/",
+                [SHELL], env,
                 GLib.SpawnFlags.DO_NOT_REAP_CHILD,
                 None, None, -1, None, self._on_spawn, None)
         else:
@@ -72,7 +88,8 @@ class TerminalTab(Gtk.Box):
 
     def _on_spawn(self, terminal, pid, err):
         if err:
-            print(f"[bastille-terminal] spawn error: {err}")
+            print(f"[bastille-terminal] spawn error: {err}", file=sys.stderr)
+            self._vte.feed(f"bastille-terminal: could not start {SHELL}: {err}\r\n".encode())
 
     def feed(self, text: str):
         if HAS_VTE:

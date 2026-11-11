@@ -30,6 +30,11 @@ table inet bastille-firewall {
     chain output {
         type filter hook output priority filter; policy accept;
         oif lo accept
+        # dnscrypt-proxy fetches its signed resolver list through these bootstrap
+        # resolvers only (see bootstrap_resolvers in dnscrypt-proxy.toml); every
+        # other plaintext DNS query stays blocked.
+        ip daddr { 9.9.9.11, 149.112.112.11, 1.1.1.1, 8.8.8.8 } udp dport 53 accept
+        ip daddr { 9.9.9.11, 149.112.112.11, 1.1.1.1, 8.8.8.8 } tcp dport 53 accept
         oifname != "lo" udp dport 53 drop
         oifname != "lo" tcp dport 53 drop
     }
