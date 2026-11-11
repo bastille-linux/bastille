@@ -65,6 +65,11 @@ xwayland
 # Network & VPN
 wireguard-tools
 network-manager
+# NetworkManager only *recommends* wpa_supplicant, and the image is built without
+# recommends: without it Wi-Fi cards are present but never scan or connect.
+wpasupplicant
+iw
+wireless-regdb
 iproute2
 nftables
 
