@@ -326,33 +326,19 @@ class AppsPage(Adw.NavigationPage):
         title = Gtk.Label.new("Applications")
         title.add_css_class("title-2")
         box.append(title)
-        desc = Gtk.Label.new("Select apps to install from the Bastille verified catalogue. "
-                              "All are sandboxed Flatpaks except system tools.")
+        desc = Gtk.Label.new("The essentials (Files, Browser, Terminal, Settings, App Store) are already installed. "
+                              "Pick extra apps to download from github.com/bastille-linux/apps.")
         desc.add_css_class("dim-label"); desc.set_wrap(True)
         box.append(desc)
 
         groups = {
-            "Communication": [
-                ("Signal", "signal-desktop", True),
-                ("Thunderbird", "org.mozilla.Thunderbird", True),
-                ("Element (Matrix)", "im.riot.Riot", False),
-            ],
-            "Privacy tools": [
-                ("Tor Browser", "com.github.micahflee.torbrowser-launcher", False),
-                ("OnionShare", "org.onionshare.OnionShare", False),
-                ("KeePassXC", "org.keepassxc.KeePassXC", True),
-                ("Kleopatra (GPG)", "org.kde.kleopatra", False),
-            ],
-            "Media & Documents": [
-                ("LibreOffice", "org.libreoffice.LibreOffice", True),
-                ("VLC", "org.videolan.VLC", False),
-                ("GIMP", "org.gimp.GIMP", False),
-                ("Metadata Cleaner", "fr.romainvigier.MetadataCleaner", True),
-            ],
-            "Peripherals": [
-                ("Cheese (webcam)", "org.gnome.Cheese", False),
-                ("CUPS printer support", "system-cups", False),
-            ],
+            "Privacy & communication": [
+                ("Mail", "mail", True), ("Messages", "messages", True), ("Calendar", "calendar", False)],
+            "Files & office": [
+                ("Notes", "notes", True), ("Documents", "documents", False),
+                ("Sheets", "sheets", False), ("Presentations", "presentations", False)],
+            "Tools & media": [
+                ("Maps", "maps", False), ("Music", "music", False), ("Weather", "weather", False)],
         }
 
         scroll = Gtk.ScrolledWindow()
@@ -366,7 +352,7 @@ class AppsPage(Adw.NavigationPage):
             for app_name, app_id, default in apps:
                 row = Adw.ActionRow()
                 row.set_title(app_name)
-                row.set_subtitle(app_id)
+                row.set_subtitle("bastille-linux/apps")
                 cb = Gtk.CheckButton()
                 cb.set_active(default)
                 cb.set_valign(Gtk.Align.CENTER)
@@ -554,8 +540,9 @@ class SetupWizard(Adw.ApplicationWindow):
         }
 
         failures = []
-        skipped_apps = [app_id for app_id in config["apps"] if not flatpak_installable(app_id)]
-        installable_apps = [app_id for app_id in config["apps"] if flatpak_installable(app_id)]
+        repo_apps = [a for a in config["apps"] if "." not in a]
+        skipped_apps = [a for a in config["apps"] if "." in a and not flatpak_installable(a)]
+        installable_apps = [a for a in config["apps"] if "." in a and flatpak_installable(a)]
 
         if config["storage_mode"] == "live" and not self._persist_page._skip.get_active():
             device = self._persist_page._dev_entry.get_text().strip()
@@ -605,6 +592,14 @@ class SetupWizard(Adw.ApplicationWindow):
         os.makedirs("/etc/bastille", exist_ok=True)
         with open("/etc/bastille/profile", "w") as f:
             f.write(config["profile"])
+
+        # Download the chosen apps from bastille-linux/apps (background)
+        if repo_apps:
+            def fetch_repo_apps():
+                subprocess.run(["pkexec", "/usr/local/sbin/bastille-apps", "install", *repo_apps],
+                               capture_output=True, text=True)
+            import threading
+            threading.Thread(target=fetch_repo_apps, daemon=True).start()
 
         # Install apps (background)
         if installable_apps:

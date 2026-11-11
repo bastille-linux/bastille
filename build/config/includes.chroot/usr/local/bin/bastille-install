@@ -147,6 +147,7 @@ ICONS = {
     "music": "M9 18V6l10-2v12M9 18a3 3 0 11-6 0 3 3 0 016 0zM19 16a3 3 0 11-6 0 3 3 0 016 0z",
     "cloud": "M7 18a4 4 0 010-8 5 5 0 019.5 1A3.5 3.5 0 0117 18z",
     "term": "M4 5h16v14H4zM8 10l3 2-3 2M13 15h3",
+    "store": "M5 8h14l-1 12H6zM9 8V6a3 3 0 016 0v2",
     "spin": "M12 3a9 9 0 019 9",
     "dot": "M12 12h.01",
     "chev": "M9 6l6 6-6 6",
@@ -387,6 +388,7 @@ REQUIRED_APPS = [
     ("files", "Files", "File manager showing age/GPG encryption badges", "gn", "folder"),
     ("browser", "Browser", "Privacy browser combining Tor and Zen", "pu", "globe"),
     ("terminal", "Terminal", "Multi-tab terminal based on VTE", "gn", "term"),
+    ("store", "App Store", "Install and update apps from Bastille and Flathub", "bl", "store"),
 ]
 APP_GROUPS = [
     ("Privacy & communication", [
