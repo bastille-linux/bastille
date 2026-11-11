@@ -1,0 +1,10 @@
+#!/bin/sh
+# Rebuild the live initramfs now that /etc/initramfs-tools/{modules,conf.d} are
+# in place, so the keyboard and USB drivers are inside it. Without them the
+# passphrase prompt live-boot shows for an encrypted disk cannot be typed into.
+set -e
+update-initramfs -u -k all
+for f in /boot/initrd.img-*; do
+    echo "== $f"
+    lsinitramfs "$f" | grep -E "atkbd|i8042|usbhid|hid-generic|hid_generic" | head -5 || true
+done
