@@ -151,6 +151,7 @@ ICONS = {
     "spin": "M12 3a9 9 0 019 9",
     "dot": "M12 12h.01",
     "chev": "M9 6l6 6-6 6",
+    "wifi": "M5 12.5a10 10 0 0114 0M8 16a6 6 0 018 0M12 19.5h.01",
     "plus": "M12 5v14M5 12h14",
 }
 
@@ -362,6 +363,7 @@ class State:
         self.accounts = {}            # key -> details dict
         self.apps = set()
         self.pins = {}                # type -> digits
+        self.networks = []            # Wi-Fi names joined during setup, carried to the installed system
 
 
 LEVELS = [("standard", "Standard", "Basic hardening. Suitable for everyday use with privacy.", "bl", "shield"),
@@ -412,7 +414,7 @@ REQUIRED_NAMES = ", ".join(n for _, n, *_ in REQUIRED_APPS)
 
 NAV = [("Start", [("Welcome", "shield")]),
        ("Disk", [("Disk", "disk"), ("Hardware", "chip"), ("Encryption", "lock")]),
-       ("System", [("User", "user"), ("Profiles", "prof"), ("Online accounts", "acct"), ("Apps", "apps")]),
+       ("System", [("User", "user"), ("Network", "wifi"), ("Profiles", "prof"), ("Online accounts", "acct"), ("Apps", "apps")]),
        ("Security", [("Duress PINs", "pin")]),
        ("Install", [("Review", "list"), ("Install", "down"), ("Done", "ok")])]
 
@@ -803,6 +805,155 @@ class UserPage(Page):
         if not re.match(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$", self.host.get_text() or "x"):
             return "Computer name: letters, digits and '-' only."
         return None
+
+
+class NetworkPage(Page):
+    title = "Network"
+    sub = "Join your Wi-Fi now and Bastille remembers it on the installed system. Optional: wired connections need no setup."
+    hint = "Optional · you can also do this later from the network menu"
+
+    def build(self):
+        self._busy = False
+        self._pick = None
+        self.status = Card(Row("Checking…", None, "bl", "wifi", [], muted=True))
+        self.add(section("Connection", self.status))
+        self.rescan_btn = button("Rescan", small=True)
+        self.rescan_btn.connect("clicked", lambda *_: self.scan())
+        self.nets = Card()
+        self.add(section("Wi-Fi networks", self.nets))
+        self.nets_head = self.box.get_last_child()
+        self.pw = password_entry(300)
+        self.pw.connect("activate", lambda *_: self._join())
+        self.join_btn = button("Join", "pri", small=True)
+        self.join_btn.connect("clicked", lambda *_: self._join())
+        self.msg = label("", "row-desc", wrap=True)
+        self.form_title = Row("", "Enter the password for this network", None, None, [self.pw, self.join_btn])
+        self.form = Card(self.form_title)
+        self.form.set_visible(False)
+        self.add(self.form)
+        self.add(self.msg)
+        self.add(Card(Row("Saved to the installed system",
+                          "Networks you join here are copied, with their passwords, onto the encrypted disk.",
+                          "bl", "info")))
+
+    # nmcli helpers ----------------------------------------------------
+    @staticmethod
+    def _nm(*args, timeout=20):
+        try:
+            r = subprocess.run(["nmcli", *args], capture_output=True, text=True, timeout=timeout)
+            return r.returncode, (r.stdout or "") + (r.stderr or "")
+        except Exception as e:  # noqa: BLE001
+            return 1, str(e)
+
+    def on_show(self):
+        self.scan()
+
+    def scan(self):
+        self.rescan_btn.set_sensitive(False)
+        self.msg.set_text("")
+
+        def work():
+            _, state = self._nm("-t", "-f", "TYPE,STATE,CONNECTION", "device")
+            rc, out = self._nm("-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes",
+                               timeout=25)
+            GLib.idle_add(self._show_scan, state, rc, out)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_scan(self, state, rc, out):
+        self.rescan_btn.set_sensitive(True)
+        wired = wifi = None
+        for line in state.splitlines():
+            f = line.split(":")
+            if len(f) >= 3 and f[1] == "connected":
+                if f[0] == "ethernet":
+                    wired = f[2]
+                elif f[0] == "wifi":
+                    wifi = f[2]
+        self.status.clear()
+        if wifi:
+            self.status.append(Row(f"Connected to {wifi}", "Wi-Fi", "gn", "wifi", [badge("Online", "ok")]))
+        elif wired:
+            self.status.append(Row("Connected by cable", "Nothing more to set up", "gn", "wifi", [badge("Online", "ok")]))
+        else:
+            self.status.append(Row("Not connected", "Pick a network below, or continue offline", "am", "wifi",
+                                   [badge("Offline", "warn")]))
+        par = self.rescan_btn.get_parent()
+        if par is not None:
+            par.remove(self.rescan_btn)
+        self.nets.clear()
+        seen = set()
+        rows = []
+        for line in out.splitlines():
+            parts = line.replace("\\:", "\x00").split(":")
+            if len(parts) < 4:
+                continue
+            use, ssid, sig, sec = parts[0], parts[1].replace("\x00", ":"), parts[2], ":".join(parts[3:])
+            if not ssid or ssid in seen:
+                continue
+            seen.add(ssid)
+            rows.append((use == "*", ssid, int(sig or 0), bool(sec.strip()) and sec.strip() != "--"))
+        rows.sort(key=lambda r: (not r[0], -r[2]))
+        if not rows:
+            self.nets.append(Row("No networks found" if rc == 0 else "Wi-Fi unavailable",
+                                 "Check that the Wi-Fi switch is on, then press Rescan.", "am", "wifi", [self.rescan_btn]))
+        for i, (inuse, ssid, sig, secured) in enumerate(rows[:12]):
+            btn = button("Connected" if inuse else "Connect", small=True)
+            btn.set_sensitive(not inuse)
+            btn.connect("clicked", lambda _b, n=ssid, sc=secured: self._choose(n, sc))
+            bars = "▂▄▆█"[min(3, sig // 26)]
+            suffix = [label(f"{bars} {sig}%", "row-desc")]
+            if secured:
+                suffix.append(badge("Secured", "off"))
+            suffix.append(btn)
+            if i == 0:
+                suffix.insert(0, self.rescan_btn)
+            self.nets.append(Row(ssid, "Joined" if ssid in self.st.networks else None, "bl", "wifi", suffix))
+        return False
+
+    def _choose(self, ssid, secured):
+        self._pick = ssid
+        if secured:
+            self.form_title.title.set_text(ssid)
+            self.pw.set_text("")
+            self.form.set_visible(True)
+            self.pw.grab_focus()
+        else:
+            self.form.set_visible(False)
+            self._connect(ssid, None)
+
+    def _join(self):
+        if self._pick and self.pw.get_text():
+            self._connect(self._pick, self.pw.get_text())
+
+    def _connect(self, ssid, password):
+        if self._busy:
+            return
+        self._busy = True
+        self.msg.set_text(f"Connecting to {ssid}…")
+
+        def work():
+            # drop any stale profile first so a wrong password never lingers
+            self._nm("connection", "delete", "id", ssid, timeout=10)
+            args = ["device", "wifi", "connect", ssid] + (["password", password] if password else [])
+            rc, out = self._nm(*args, timeout=45)
+            if rc != 0:
+                self._nm("connection", "delete", "id", ssid, timeout=10)
+            GLib.idle_add(self._connected, ssid, rc, out)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _connected(self, ssid, rc, out):
+        self._busy = False
+        if rc == 0:
+            if ssid not in self.st.networks:
+                self.st.networks.append(ssid)
+            self.form.set_visible(False)
+            self.msg.set_text(f"Connected to {ssid}. It will be remembered after install.")
+            self.scan()
+        else:
+            low = out.lower()
+            self.msg.set_text("Wrong password, try again." if "secrets" in low or "password" in low
+                              else "Could not connect: " + (out.strip().splitlines() or ["unknown error"])[-1])
+        return False
 
 
 class ProfilesPage(Page):
@@ -1288,6 +1439,8 @@ class ReviewPage(Page):
             ("Computer name", f"{s.hostname} · randomised at each start", []),
             ("Profiles", f"Main ({LEVEL_NAME[s.level]}) and Decoy" + "".join(f" and {p}" for p in s.profiles),
              [badge(f"{2 + len(s.profiles)} profiles", "ok")]),
+            ("Network", (", ".join(s.networks) + " · remembered on the installed system") if s.networks
+             else "No Wi-Fi saved · connect after install", []),
             ("Online accounts",
              (" and ".join(ACCOUNT_NAME[a] for a in sorted(s.accounts)) + " · details saved on the encrypted disk")
              if na else "None · add them later in Settings",
@@ -1480,9 +1633,10 @@ class InstallWindow(Adw.ApplicationWindow):
         self.ready = False
 
         self.pages = [WelcomePage(self), DiskPage(self), HardwarePage(self), EncryptionPage(self), UserPage(self),
-                      ProfilesPage(self), AccountsPage(self), AppsPage(self), DuressPage(self),
+                      NetworkPage(self), ProfilesPage(self), AccountsPage(self), AppsPage(self), DuressPage(self),
                       ReviewPage(self), InstallingPage(self), DonePage(self)]
-        (self.welcome, self.disk_page, self.hardware_page, self.enc_page, self.user_page, self.profiles_page,
+        (self.welcome, self.disk_page, self.hardware_page, self.enc_page, self.user_page, self.network_page,
+         self.profiles_page,
          self.accounts_page, self.apps_page, self.duress_page, self.review_page,
          self.install_page, self.done_page) = self.pages
         self.idx = 0
@@ -1638,6 +1792,7 @@ class InstallWindow(Adw.ApplicationWindow):
             "hostname": s.hostname, "level": s.level, "profiles": list(s.profiles),
             "fake_duress_target": s.fake_target, "accounts": {k: dict(v) for k, v in s.accounts.items()},
             "apps": [a for a in APP_ALL if a in s.apps], "pins": dict(s.pins),
+            "wifi": list(s.networks),
         }
 
     def _start_install(self):

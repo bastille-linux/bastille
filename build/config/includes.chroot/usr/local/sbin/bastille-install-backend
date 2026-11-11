@@ -468,6 +468,38 @@ class Installer:
     def uuid(self, dev):
         return run("blkid", "-s", "UUID", "-o", "value", dev).stdout.strip()
 
+    def copy_wifi(self, ssids):
+        """Carry Wi-Fi profiles joined during setup (with their keys) to the installed system."""
+        if not ssids:
+            return
+        import configparser
+        src = "/etc/NetworkManager/system-connections"
+        dst = f"{TARGET}/etc/NetworkManager/system-connections"
+        os.makedirs(dst, mode=0o700, exist_ok=True)
+        want = {s for s in ssids if isinstance(s, str)}
+        copied = 0
+        try:
+            names = os.listdir(src)
+        except OSError:
+            log("no NetworkManager profiles found; skipping Wi-Fi copy")
+            return
+        for name in names:
+            path = os.path.join(src, name)
+            if not name.endswith(".nmconnection") or not os.path.isfile(path):
+                continue
+            cp = configparser.RawConfigParser(strict=False)
+            try:
+                cp.read(path)
+                ssid = cp.get("wifi", "ssid")
+            except Exception:  # noqa: BLE001
+                continue
+            if ssid in want:
+                target = os.path.join(dst, os.path.basename(name))
+                shutil.copyfile(path, target)
+                os.chmod(target, 0o600)
+                copied += 1
+        log(f"saved {copied} Wi-Fi network(s) for the installed system")
+
     def configure(self):
         c = self.cfg
         t = TARGET
@@ -515,6 +547,8 @@ class Installer:
 
         with open(f"{t}/etc/hostname", "w") as f:
             f.write(hostname + "\n")
+
+        self.copy_wifi(c.get("wifi") or [])
 
         # Keep the installer choice explicit and auditable. Hardware profiles
         # are intentionally data-only for now; device-specific tuning must be
