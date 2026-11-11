@@ -51,6 +51,16 @@ jobs:
           bash scripts/test-backup-safety.sh
           bash scripts/test-backup-roundtrip.sh
 
+      - name: Validate dnscrypt-proxy config
+        run: |
+          apt-get install -y --no-install-recommends dnscrypt-proxy
+          out="$(dnscrypt-proxy -config build/config/includes.chroot/etc/dnscrypt-proxy/dnscrypt-proxy.toml -check 2>&1 || true)"
+          echo "$out"
+          if echo "$out" | grep -qi "unsupported key\|\[FATAL\]"; then
+            echo "dnscrypt-proxy rejected the shipped config" >&2
+            exit 1
+          fi
+
       - name: Stamp release version
         run: |
           # The updater compares /etc/bastille/version with the newest release tag.

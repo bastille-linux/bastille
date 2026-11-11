@@ -39,14 +39,9 @@ block_ipv6 = false
 
 # Anonymized DNS relays are off: they need a [sources.relays] list and break startup without one.
 
-[query_log]
-  # Disabled — no DNS query logging
-  file = ''
 
-[nx_log]
-  file = ''
 
-[blacklist]
+[blocked_names]
   # Blocked domains list (populated by security profile)
   blocked_names_file = '/etc/dnscrypt-proxy/blocked-names.txt'
 

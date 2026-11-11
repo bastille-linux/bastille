@@ -1,11 +1,16 @@
 #!/bin/sh
-# Launch the Bastille terminal; if it fails to start (crash, missing VTE, GL
-# problem) fall back to foot so a terminal always opens. Output is kept in
-# ~/.cache/bastille-terminal.log for debugging.
+# Launch the Bastille terminal; fall back to foot when it fails to start OR
+# exits within a few seconds without showing a window (a crash, a missing
+# driver, or a stuck earlier instance that swallows the request).
+# Output is kept in ~/.cache/bastille-terminal.log for debugging.
 LOG="${XDG_CACHE_HOME:-$HOME/.cache}/bastille-terminal.log"
 mkdir -p "$(dirname "$LOG")" 2>/dev/null
-if bastille-terminal "$@" >>"$LOG" 2>&1; then
+start=$(date +%s)
+bastille-terminal "$@" >>"$LOG" 2>&1
+rc=$?
+now=$(date +%s)
+if [ "$rc" -eq 0 ] && [ $((now - start)) -ge 3 ]; then
     exit 0
 fi
-echo "$(date +%T) bastille-terminal failed, falling back to foot" >>"$LOG"
+echo "$(date +%T) bastille-terminal exited rc=$rc after $((now - start))s, opening foot" >>"$LOG"
 exec foot
