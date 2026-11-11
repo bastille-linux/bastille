@@ -1,0 +1,4 @@
+# Always put every storage and input driver in the initramfs. With MODULES=dep
+# the image only carries drivers for the machine it was built on, so on other
+# hardware the disk-unlock prompt shows but the keyboard is dead.
+MODULES=most

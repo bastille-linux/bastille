@@ -1,2 +1,19 @@
-squashfs
-loop
+# Keyboards (built-in PS/2 as on ThinkPads, USB, Bluetooth dongles) must work
+# at the disk-unlock prompt, before the real system is up.
+i8042
+atkbd
+serio_raw
+hid
+hid_generic
+usbhid
+hid_apple
+hid_lenovo
+usb_storage
+uas
+xhci_hcd
+xhci_pci
+ehci_hcd
+ehci_pci
+ohci_hcd
+ohci_pci
+uhci_hcd
