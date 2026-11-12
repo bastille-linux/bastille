@@ -8,6 +8,12 @@
   client this app starts itself (as the logged-in user, no root needed).
   Any *.onion address opens in a Tor tab automatically.
 """
+import os
+# Old Intel GPUs (e.g. ThinkPad T510) have no GL 3.3: WebKit's accelerated /
+# dmabuf paths then paint the page as an empty dark rectangle. Force the
+# software paths before WebKit is loaded.
+for _k in ("WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"):
+    os.environ.setdefault(_k, "1")
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
