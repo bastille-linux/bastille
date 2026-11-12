@@ -69,7 +69,7 @@ chown root:root /etc/bastille
 if [ ! -f /etc/bastille/version ]; then
     echo "dev-$(date +%Y%m%d)" > /etc/bastille/version
 fi
-chmod 644 /etc/bastille/version /etc/bastille/update.conf 2>/dev/null || true
+chmod 644 /etc/bastille/version /etc/bastille/codename /etc/bastille/update.conf 2>/dev/null || true
 
 # ── Sway / Waybar / swaylock — fix home dir ownership ─────────────────────────
 # These configs are laid in as root; chown to 'user' at runtime via login hook

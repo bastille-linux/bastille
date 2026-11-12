@@ -69,7 +69,10 @@ jobs:
       - name: Stamp release version
         run: |
           # The updater compares /etc/bastille/version with the newest release tag.
-          echo "v0.1.${{ github.run_number }}" > build/config/includes.chroot/etc/bastille/version
+          # Version comes from the VERSION file (x.y.z, bumped by hand) and the
+          # release codename from CODENAME.
+          echo "v$(cat VERSION)" > build/config/includes.chroot/etc/bastille/version
+          cat CODENAME > build/config/includes.chroot/etc/bastille/codename
           sed -i "s#^BASTILLE_GITHUB_REPO=.*#BASTILLE_GITHUB_REPO=\"${{ github.repository }}\"#" \
             build/config/includes.chroot/etc/bastille/update.conf
           cat build/config/includes.chroot/etc/bastille/version build/config/includes.chroot/etc/bastille/update.conf | head -8
@@ -102,7 +105,7 @@ jobs:
           umount /mnt/bastille-iso
 
           # Generate SHA256SUMS covering both the ISO and the raw squashfs
-          sha256sum build/live-image-amd64.hybrid.iso > bastille-amd64.iso.sha256
+          (cd build && sha256sum live-image-amd64.hybrid.iso) > bastille-amd64.iso.sha256
           sha256sum bastille-live-amd64.squashfs       > bastille-amd64.squashfs.sha256
 
           # Combined SHA256SUMS (bastille-update reads this)
@@ -127,11 +130,17 @@ jobs:
           path: /tmp/bastille-build.log
           retention-days: 3
 
+      - name: Read release version
+        id: ver
+        run: |
+          echo "tag=v$(cat VERSION)" >> "$GITHUB_OUTPUT"
+          echo "name=Bastille OS $(cat VERSION) \"$(cat CODENAME)\"" >> "$GITHUB_OUTPUT"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.${{ github.run_number }}
-          name: Bastille OS v0.1.${{ github.run_number }}
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.name }}
           body: |
             Automated build from commit ${{ github.sha }}.
 

@@ -807,7 +807,8 @@ class UpdatesPage(Gtk.ScrolledWindow):
         ver = read_file("/etc/bastille/version", "unknown")
         r_ver = Adw.ActionRow()
         r_ver.set_title("Installed version")
-        r_ver.set_subtitle(ver)
+        cn = read_file("/etc/bastille/codename", "").strip()
+        r_ver.set_subtitle(f"{ver}  \u201c{cn}\u201d" if cn else ver)
         ug.add(r_ver)
 
         r_check = Adw.ActionRow()
