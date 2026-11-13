@@ -657,8 +657,17 @@ class Installer:
         else:
             shutil.copy("/etc/resolv.conf", f"{t}/etc/resolv.conf") \
                 if os.path.exists("/etc/resolv.conf") else None
+            # A wrong clock makes apt reject every repository as "not live yet".
+            run("/usr/local/sbin/bastille-timesync", check=False)
             r1 = chroot("apt-get", "update", check=False)
-            r2 = chroot("apt-get", "install", "-y", "--no-install-recommends", *deps,
+            extra = []
+            if r1.returncode:
+                # Still failing (clock could not be set): signatures are still verified,
+                # only the release-date check is skipped for this one-off install.
+                log("apt update failed; retrying without the release date check")
+                extra = ["-o", "Acquire::Check-Date=false"]
+                r1 = chroot("apt-get", *extra, "update", check=False)
+            r2 = chroot("apt-get", *extra, "install", "-y", "--no-install-recommends", *deps,
                         check=False)
             if r1.returncode or r2.returncode:
                 log("package install failed: bastille-apps-pending installs them once the network is up")
