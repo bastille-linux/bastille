@@ -802,7 +802,7 @@ class UpdatesPage(Gtk.ScrolledWindow):
 
         ug = Adw.PreferencesGroup()
         ug.set_title("OS updates")
-        ug.set_description("In-place squashfs update verified against GitHub Releases SHA256")
+        ug.set_description("In-place update verified against GitHub Releases SHA256 (updated in place via 1.0.1)")
 
         ver = read_file("/etc/bastille/version", "unknown")
         r_ver = Adw.ActionRow()
