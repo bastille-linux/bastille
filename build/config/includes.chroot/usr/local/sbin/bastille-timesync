@@ -11,5 +11,14 @@ for url in https://www.cloudflare.com/ https://www.google.com/ https://deb.debia
         date -u -s "$d" >/dev/null && { hwclock --systohc 2>/dev/null || true; echo "bastille-timesync: clock set from $url ($d)"; exit 0; }
     fi
 done
+# Last resort: with a badly wrong clock TLS itself fails (certificate "not yet
+# valid"). Read only the Date header without validating the certificate, accept
+# it only if it is plausible (not before this software was built).
+for url in https://www.cloudflare.com/ https://www.google.com/; do
+    d="$(curl -sSI -k --max-time 10 "$url" 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /^Date:/ {sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}')"
+    if [ -n "$d" ] && t="$(date -u -d "$d" +%s 2>/dev/null)" && [ "$t" -ge 1767225600 ]; then
+        date -u -s "$d" >/dev/null && { hwclock --systohc 2>/dev/null || true; echo "bastille-timesync: clock set from $url without TLS validation ($d)"; exit 0; }
+    fi
+done
 echo "bastille-timesync: no trusted Date header reachable; clock unchanged" >&2
 exit 1

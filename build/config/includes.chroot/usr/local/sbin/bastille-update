@@ -141,15 +141,20 @@ sys.exit(1)
 # ── Download + verify ─────────────────────────────────────────────────────────
 
 download_asset() {
-    local url="$1" dest="$2"
+    # Resumable: slow links (Wi-Fi) must not restart a 1 GB download from zero.
+    # No overall time limit; only give up if the transfer stalls (<1 KB/s for 60 s).
+    local url="$1" dest="$2" try
     info "Downloading $(basename "$dest")..."
-    curl -sSfL \
-        --max-time 600 \
-        --retry 3 \
-        --retry-delay 5 \
-        --progress-bar \
-        -o "$dest" \
-        "$url"
+    for try in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        if curl -sSfL -C - \
+            --connect-timeout 30 --speed-limit 1024 --speed-time 60 \
+            --progress-bar -o "$dest" "$url"; then
+            return 0
+        fi
+        warn "download interrupted (attempt $try); resuming..."
+        sleep 5
+    done
+    return 1
 }
 
 verify_sha256() {
@@ -412,7 +417,10 @@ cmd_apply_installed() {
         squashfs_url="$(echo "$release_json" | parse_asset_url "$SQUASHFS_ASSET")"
         sha256_url="$(echo "$release_json" | parse_asset_url "$SHA256SUMS_ASSET")"
         sq="$DOWNLOAD_DIR/$SQUASHFS_ASSET"; sums="$DOWNLOAD_DIR/SHA256SUMS"
-        rm -f "$sq" "$sums"
+        # keep a partial download of the SAME release so it can resume
+        if [ "$(cat "$DOWNLOAD_DIR/.partial-tag" 2>/dev/null)" != "$latest" ]; then rm -f "$sq"; fi
+        echo "$latest" > "$DOWNLOAD_DIR/.partial-tag"
+        rm -f "$sums"
         download_asset "$sha256_url" "$sums"
         download_asset "$squashfs_url" "$sq"
         verify_sha256 "$sq" "$sums"
@@ -420,7 +428,7 @@ cmd_apply_installed() {
         mount -t squashfs -o ro,loop "$sq" "$mnt" || die "could not mount the downloaded image"
         overlay_apply "$mnt" || { umount "$mnt" 2>/dev/null; die "applying the new files failed"; }
         umount "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null || true
-        rm -f "$sq" "$sums"
+        rm -f "$sq" "$sums" "$DOWNLOAD_DIR/.partial-tag"
         info "Bastille system files updated: $installed -> $latest"
     fi
 
