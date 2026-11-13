@@ -227,7 +227,7 @@ def recent_apps(n=5):
 
 
 def about_info():
-    d = {"version": read_text("/etc/bastille/version", "dev"), "kernel": os.uname().release,
+    d = {"version": read_text("/etc/bastille/version", "dev"), "codename": read_text("/etc/bastille/codename", ""), "kernel": os.uname().release,
          "host": os.uname().nodename, "arch": os.uname().machine}
     cpu = ""
     try:

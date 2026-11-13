@@ -403,7 +403,7 @@ class BrowserWindow(Adw.ApplicationWindow):
         v = WebKit.WebView(**kw)
         v.set_hexpand(True)
         v.set_vexpand(True)
-        v.set_background_color(Gdk.RGBA(0.043, 0.043, 0.043, 1))
+        v.set_background_color(Gdk.RGBA(1, 1, 1, 1))   # sites assume a white canvas; our own pages set their own background
         s = v.get_settings()
         for prop, val in (("enable-developer-extras", False), ("enable-back-forward-navigation-gestures", True),
                           ("enable-webrtc", False if tor else True),

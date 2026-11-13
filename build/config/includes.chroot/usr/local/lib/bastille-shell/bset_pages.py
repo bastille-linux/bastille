@@ -81,7 +81,7 @@ class AboutPage(Page):
         model = read("/sys/class/dmi/id/product_version") or read("/sys/class/dmi/id/product_name")
         mode = "UEFI" if os.path.isdir("/sys/firmware/efi") else "Legacy BIOS"
         self.section("Bastille OS", *[
-            Row("shield", "bl", "Release", a["version"] or "dev", badge(a["arch"], "off")),
+            Row("shield", "bl", "Release", ((a["version"] or "dev") + (f' \u201c{a["codename"]}\u201d' if a.get("codename") else "")), badge(a["arch"], "off")),
             Row("gear", "", "Kernel", a["kernel"]),
             Row("info", "", "Hostname", a["host"]),
             Row("cpu", "", "Hardware profile", prof)])
