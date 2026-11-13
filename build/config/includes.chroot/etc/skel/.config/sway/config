@@ -22,7 +22,8 @@ output * bg /usr/share/backgrounds/bastille/default.jpg fill
 
 # ── Input ─────────────────────────────────────────────────────────────────────
 input type:keyboard {
-    xkb_numlock enabled
+    # Laptops with an embedded number pad (ThinkPad T-series) turn J K L U I O M ... into digits when NumLock is on.
+    xkb_numlock disabled
     repeat_delay 300
     repeat_rate 40
 }
