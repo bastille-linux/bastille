@@ -1,0 +1,10 @@
+#!/bin/sh
+# Fix the clock as soon as a connection is fully up (the boot-time sync runs
+# before Wi-Fi exists and therefore never succeeds).
+case "$2" in
+    up|connectivity-change|dhcp4-change) ;;
+    *) exit 0 ;;
+esac
+[ "$2" = "connectivity-change" ] && [ "$CONNECTIVITY_STATE" != "FULL" ] && exit 0
+( sleep 3; /usr/local/sbin/bastille-timesync ) >/dev/null 2>&1 &
+exit 0

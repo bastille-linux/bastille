@@ -1,0 +1,15 @@
+#!/bin/bash
+# bastille-timesync — set the clock from a trusted HTTPS Date header (no NTP,
+# so no plain UDP to time servers). Needs a working network + DNS.
+# Run at boot, whenever a network comes up (NetworkManager dispatcher) and
+# before updates, because apt rejects repositories whose signatures are
+# "not live yet" when the clock is behind.
+[ "$(id -u)" -eq 0 ] || exit 0
+for url in https://www.cloudflare.com/ https://www.google.com/ https://deb.debian.org/; do
+    d="$(curl -fsSI --max-time 10 "$url" 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /^Date:/ {sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}')"
+    if [ -n "$d" ] && date -u -d "$d" >/dev/null 2>&1; then
+        date -u -s "$d" >/dev/null && { hwclock --systohc 2>/dev/null || true; echo "bastille-timesync: clock set from $url ($d)"; exit 0; }
+    fi
+done
+echo "bastille-timesync: no trusted Date header reachable; clock unchanged" >&2
+exit 1

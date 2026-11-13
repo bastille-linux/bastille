@@ -31,7 +31,12 @@ SQUASHFS_PATH="${BASTILLE_SQUASHFS_PATH:-live/filesystem.squashfs}"
 PREVIOUS_SUFFIX="${BASTILLE_PREVIOUS_SUFFIX:-.previous}"
 FAILED_SUFFIX="${BASTILLE_FAILED_SUFFIX:-.failed}"
 DOWNLOAD_DIR="${BASTILLE_DOWNLOAD_DIR:-/var/cache/bastille-update}"
-NOTIFY_USER="${BASTILLE_NOTIFY_USER:-user}"
+NOTIFY_USER="${BASTILLE_NOTIFY_USER:-}"
+if [ -z "$NOTIFY_USER" ]; then
+    # first real login user (uid 1000+), falling back to the live user
+    NOTIFY_USER="$(awk -F: '$3>=1000 && $3<60000 {print $1; exit}' /etc/passwd 2>/dev/null)"
+    NOTIFY_USER="${NOTIFY_USER:-user}"
+fi
 
 # Detect architecture
 ARCH="$(uname -m)"
@@ -55,6 +60,7 @@ warn()  { echo "bastille-update: WARNING: $*" >&2; }
 
 notify_user() {
     local summary="$1" body="${2:-}"
+    id "$NOTIFY_USER" >/dev/null 2>&1 || return 0
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u "$NOTIFY_USER")/bus" \
         sudo -u "$NOTIFY_USER" \
         notify-send --app-name="Bastille Update" \
@@ -349,19 +355,84 @@ cmd_apply() {
         "Bastille OS updated from $installed to $latest. Reboot when ready."
 }
 
+# Files the OS image owns on an installed system. Updating them in place is
+# how an installed Bastille gets new apps/fixes without a reinstall. User data
+# (/home, /etc/fstab, crypttab, hostname, network profiles, bootloader) is
+# never touched.
+overlay_apply() {
+    local src="$1" rel f
+    # whole directories shipped by Bastille
+    for rel in usr/local/bin usr/local/sbin usr/local/lib/bastille-shell \
+               usr/share/polkit-1/rules.d etc/NetworkManager/dispatcher.d; do
+        [ -d "$src/$rel" ] || continue
+        mkdir -p "/$rel"
+        for f in "$src/$rel"/*; do
+            [ -e "$f" ] || continue
+            # --remove-destination: new inode, so a running script is not corrupted
+            cp -a --remove-destination "$f" "/$rel/"
+        done
+    done
+    # individual files / globs
+    for f in "$src"/usr/share/applications/bastille-*.desktop \
+             "$src"/etc/init.d/bastille-* "$src"/etc/init.d/dnscrypt-proxy \
+             "$src"/etc/dnscrypt-proxy/dnscrypt-proxy.toml \
+             "$src"/etc/dnscrypt-proxy/blocked-names.txt \
+             "$src"/etc/bastille/version "$src"/etc/bastille/codename \
+             "$src"/etc/bastille/update.conf; do
+        [ -e "$f" ] || continue
+        rel="${f#"$src"/}"
+        mkdir -p "/$(dirname "$rel")"
+        cp -a --remove-destination "$f" "/$rel"
+    done
+    chmod 644 /etc/bastille/version /etc/bastille/codename /etc/bastille/update.conf 2>/dev/null || true
+}
+
 cmd_apply_installed() {
     require_root
-    command -v apt-get >/dev/null 2>&1 || die "apt-get is not available on this installation"
+    mkdir -p "$DOWNLOAD_DIR"; chmod 700 "$DOWNLOAD_DIR"
+    info "Installed system detected."
+
+    # A wrong clock makes apt (and TLS) reject everything as "not live yet".
+    /usr/local/sbin/bastille-timesync || warn "could not sync the clock; package signatures may be rejected"
+
     if command -v bastille-recovery >/dev/null 2>&1; then
-        info "Creating a recovery point before changing installed packages"
+        info "Creating a recovery point before changing the system"
         bastille-recovery snapshot >/dev/null || die "could not create recovery point; update cancelled"
     fi
-    info "Installed system detected — applying signed Debian package updates"
+
+    # 1) Bastille's own files, from the signed release image
+    local installed latest release_json squashfs_url sha256_url sq sums mnt
+    installed="$(installed_version)"
+    release_json="$(fetch_release_json)" || die "could not reach GitHub"
+    latest="$(echo "$release_json" | parse_latest_tag)"
+    info "Installed: $installed   Latest: $latest"
+    if [ "$installed" = "$latest" ]; then
+        info "Bastille system files are already up to date."
+    else
+        squashfs_url="$(echo "$release_json" | parse_asset_url "$SQUASHFS_ASSET")"
+        sha256_url="$(echo "$release_json" | parse_asset_url "$SHA256SUMS_ASSET")"
+        sq="$DOWNLOAD_DIR/$SQUASHFS_ASSET"; sums="$DOWNLOAD_DIR/SHA256SUMS"
+        rm -f "$sq" "$sums"
+        download_asset "$sha256_url" "$sums"
+        download_asset "$squashfs_url" "$sq"
+        verify_sha256 "$sq" "$sums"
+        mnt="$(mktemp -d /run/bastille-update.XXXXXX)"
+        mount -t squashfs -o ro,loop "$sq" "$mnt" || die "could not mount the downloaded image"
+        overlay_apply "$mnt" || { umount "$mnt" 2>/dev/null; die "applying the new files failed"; }
+        umount "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null || true
+        rm -f "$sq" "$sums"
+        info "Bastille system files updated: $installed -> $latest"
+    fi
+
+    # 2) Debian packages (non-fatal: the Bastille update above already applied)
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update || die "package index refresh failed"
-    apt-get -y --with-new-pkgs upgrade || die "package upgrade failed; no reboot was performed"
-    info "Installed system packages updated successfully. Reboot if the kernel or core libraries changed."
-    notify_user "Bastille packages updated" "The installed system package updates completed successfully."
+    if apt-get update && apt-get -y --with-new-pkgs upgrade; then
+        info "Debian packages updated."
+    else
+        warn "Debian package update failed (the Bastille files above were still updated)"
+    fi
+    info "Done. Log out and back in (or reboot) to use the new version."
+    notify_user "Bastille updated" "Now on $(installed_version). Log out and back in to use it."
 }
 
 cmd_verify() {
