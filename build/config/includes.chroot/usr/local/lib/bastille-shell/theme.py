@@ -57,6 +57,7 @@ label { color: #f4f6f5; }
 /* dock */
 .dock { background: rgba(30,35,33,0.62); border: 1px solid rgba(255,255,255,0.20);
         border-radius: 28px; padding: 7px 12px; }
+.sq { background: #1c1d20; border: 1px solid rgba(255,255,255,0.14); border-radius: 23%; }
 .dockbtn { background: transparent; background-image: none; border: none; box-shadow: none;
            border-radius: 16px; padding: 4px; min-width: 0; min-height: 0;
            transition: transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2), background 160ms ease; }

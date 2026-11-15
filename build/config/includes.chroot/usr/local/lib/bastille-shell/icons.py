@@ -157,3 +157,46 @@ def badge(glyph, c1, c2, size=26, radius=None):
     img.set_halign(Gtk.Align.CENTER)
     img.set_valign(Gtk.Align.CENTER)
     return img
+
+
+# ── third-party apps keep their own artwork, but sit on the same squircle plate ─
+# (like macOS: the icon is the app's, the shape and backing are the system's)
+
+def squircle(img, size):
+    """Wrap an app's own icon image in Bastille's uniform rounded plate."""
+    plate = Gtk.Box()
+    plate.add_css_class("sq")
+    plate.set_overflow(Gtk.Overflow.HIDDEN)
+    plate.set_size_request(size, size)
+    plate.set_halign(Gtk.Align.CENTER)
+    plate.set_valign(Gtk.Align.CENTER)
+    img.set_pixel_size(int(size * 0.80))
+    img.set_halign(Gtk.Align.CENTER)
+    img.set_valign(Gtk.Align.CENTER)
+    img.set_hexpand(True)
+    img.set_vexpand(True)
+    plate.append(img)
+    return plate
+
+
+_FLATHUB_ICON_DIRS = [
+    "/var/lib/flatpak/appstream/flathub/{arch}/active/icons/128x128",
+    "/var/lib/flatpak/appstream/flathub/{arch}/active/icons/64x64",
+    "~/.local/share/flatpak/appstream/flathub/{arch}/active/icons/128x128",
+    "~/.local/share/flatpak/appstream/flathub/{arch}/active/icons/64x64",
+]
+
+
+def native(app_id, size):
+    """The app's own icon (installed theme icon, else Flathub's appstream icon) on a squircle; None if unknown."""
+    import os
+    import platform
+    theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+    if app_id and theme.has_icon(app_id):
+        return squircle(Gtk.Image.new_from_icon_name(app_id), size)
+    arch = {"x86_64": "x86_64", "aarch64": "aarch64"}.get(platform.machine(), platform.machine())
+    for d in _FLATHUB_ICON_DIRS:
+        f = os.path.join(os.path.expanduser(d.format(arch=arch)), app_id + ".png")
+        if os.path.exists(f):
+            return squircle(Gtk.Image.new_from_file(f), size)
+    return None

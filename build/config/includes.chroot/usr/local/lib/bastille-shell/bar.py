@@ -107,7 +107,11 @@ class Bar:
         return inner
 
     def tick(self):
-        self.clock_lbl.set_text(time.strftime("%a %-d %b  %H:%M"))
+        c = system.state_load("clock.json", {})
+        fmt = ("%a " if c.get("weekday", True) else "") + ("%-d %b" if c.get("day_first", True) else "%b %-d")
+        fmt += "  " + (("%H:%M" if c.get("h24", True) else "%-I:%M") + (":%S" if c.get("seconds") else "")
+                       + ("" if c.get("h24", True) else " %p"))
+        self.clock_lbl.set_text(time.strftime(fmt))
         return True
 
     def set_focused(self, app_id):

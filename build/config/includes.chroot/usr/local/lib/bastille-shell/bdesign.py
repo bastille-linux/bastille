@@ -127,9 +127,71 @@ window.b2, window.b2.background, window.bapp.b2 { background: #0b0b0b; color: #f
 .b2 preferencesgroup > box > label.heading { font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
                                               color: #898781; }
 .b2 row.activatable:hover { background: #1a1a19; }
+
+/* ── libadwaita apps (Mail, Calendar, Notes, Messages, Music, Weather, Maps, Office launchers) ── */
+.badw navigation-view, .badw .sidebar-pane, .badw .content-pane, .badw toolbarview, .badw .view, .badw stack { background: #0b0b0b; }
+.badw .sidebar-pane { background: #151515; border-right: 1px solid rgba(255,255,255,0.10); }
+.badw list.navigation-sidebar, .badw .navigation-sidebar { background: transparent; padding: 6px 8px; }
+.badw .navigation-sidebar > row, .badw list.navigation-sidebar > row { border-radius: 8px; margin: 1px 0; padding: 3px 4px; background: transparent; }
+.badw .navigation-sidebar > row:hover { background: #1a1a19; }
+.badw .navigation-sidebar > row:selected, .badw .navigation-sidebar > row:selected:hover { background: rgba(42,120,214,0.14); color: #f0efec; }
+.badw row, .badw row.activatable { background: transparent; color: #f0efec; }
+.badw row .title, .badw row .heading { color: #f0efec; font-size: 13px; font-weight: 500; }
+.badw row .subtitle { color: #898781; font-size: 11px; }
+.badw list { background: transparent; }
+.badw list > row { border-bottom: 1px solid rgba(255,255,255,0.06); }
+.badw list > row:last-child { border-bottom: none; }
+.badw list > row:selected { background: rgba(42,120,214,0.14); }
+.badw .card { background: #151515; border: 1px solid rgba(255,255,255,0.10); border-radius: 8px; box-shadow: none; }
+.badw .card.accent, .badw .accent { color: #6aa8f0; }
+.badw .title-1, .badw .title-2, .badw .title-3, .badw .title-4, .badw .heading { color: #f0efec; font-weight: 600; }
+.badw .caption, .badw .caption-heading { color: #898781; font-size: 11px; }
+.badw button { box-shadow: none; background-image: none; border-radius: 6px; min-height: 28px; padding: 0 12px;
+             background: #1a1a19; border: 1px solid rgba(255,255,255,0.10); color: #f0efec; font-size: 12px; font-weight: 500; }
+.badw button:hover { background: #222221; }
+.badw button.flat, .badw button.image-button.flat { background: transparent; border-color: transparent; }
+.badw button.flat:hover { background: #1a1a19; }
+.badw button.suggested-action { background: #2a78d6; border-color: #2a78d6; color: #fff; }
+.badw button.suggested-action:hover { background: #3385e3; }
+.badw button.destructive-action { background: rgba(208,59,59,0.14); border-color: rgba(208,59,59,0.30); color: #f47070; }
+.badw button.circular { border-radius: 50%; min-width: 28px; padding: 0; }
+.badw windowcontrols > button, .badw windowcontrols button.titlebutton { min-height: 12px; padding: 0; }
+.badw searchentry, .badw entry, .badw .search { background: #1a1a19; border: 1px solid rgba(255,255,255,0.10); border-radius: 6px; color: #f0efec; box-shadow: none; }
+.badw popover > contents, .badw popover.menu > contents { background: #151515; border: 1px solid rgba(255,255,255,0.10); border-radius: 8px; color: #f0efec; }
+.badw modelbutton:hover { background: #1a1a19; }
+.badw calendar { background: #151515; border: 1px solid rgba(255,255,255,0.10); border-radius: 8px; color: #f0efec; padding: 6px; }
+.badw calendar:selected { background: #2a78d6; color: #fff; border-radius: 6px; }
+.badw calendar.header, .badw calendar > header { background: transparent; }
+.badw separator { background: rgba(255,255,255,0.10); min-height: 1px; min-width: 1px; }
+.badw tabbar, .badw tabbar tabbox { background: #151515; }
+.badw scrollbar slider { background: rgba(255,255,255,0.18); border-radius: 6px; min-width: 6px; min-height: 6px; }
+.badw statuspage > scrolledwindow > viewport > box > .title { color: #f0efec; }
+.badw listview, .badw columnview, .badw gridview { background: transparent; color: #f0efec; }
+.badw listview > row:selected { background: rgba(42,120,214,0.14); }
+.badw .toolbar, .badw actionbar > revealer > box { background: #151515; border-top: 1px solid rgba(255,255,255,0.10); }
+.badw infobar, .badw banner { background: #151515; color: #f0efec; }
 """
 
 _installed = False
+
+
+def apply(win):
+    """One call that gives any Adw/Gtk app window the Bastille Settings look.
+
+        import bdesign; bdesign.apply(self)      # in the window's __init__
+    """
+    try:
+        import gi
+        gi.require_version('Adw', '1')
+        from gi.repository import Adw
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+    except Exception:  # noqa: BLE001
+        pass
+    install()
+    win.add_css_class("bapp")
+    win.add_css_class("b2")
+    win.add_css_class("badw")
+    enable_maximize(win)
 
 
 def install():

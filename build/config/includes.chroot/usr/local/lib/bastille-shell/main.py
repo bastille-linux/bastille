@@ -54,6 +54,15 @@ class Shell(Gtk.Application):
         css.load_from_string(CSS) if hasattr(css, "load_from_string") else css.load_from_data(CSS.encode())
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        try:    # ~/.config/bastille/user.css: the user's own shell styling (Settings → Appearance)
+            ucss = os.path.expanduser("~/.config/bastille/user.css")
+            if os.path.exists(ucss):
+                up = Gtk.CssProvider()
+                up.load_from_path(ucss)
+                Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), up,
+                                                          Gtk.STYLE_PROVIDER_PRIORITY_USER + 20)
+        except Exception:  # noqa: BLE001
+            pass
         self.hold()
         self.toasts = Toasts(self)
         self.notifyd = Notifyd(lambda item, show: self.toasts.push(item) if show else None)

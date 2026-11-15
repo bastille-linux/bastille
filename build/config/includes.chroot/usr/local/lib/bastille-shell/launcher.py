@@ -35,8 +35,7 @@ def app_icon(info, size=34):
         names = gi_.get_names() if isinstance(gi_, Gio.ThemedIcon) else None
         if names is None or any(theme.has_icon(n) for n in names):
             img = Gtk.Image.new_from_gicon(gi_)
-            img.set_pixel_size(size)
-            return img
+            return icons.squircle(img, size)
     return icons.tile("generic", size)
 
 

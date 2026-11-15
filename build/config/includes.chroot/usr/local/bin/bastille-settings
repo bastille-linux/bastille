@@ -21,9 +21,10 @@ import icons     # noqa: E402  gradient badges for the sidebar
 import system    # noqa: E402  Wi-Fi / Bluetooth / volume helpers shared with the shell
 import bdesign   # noqa: E402  flat dark design kit (Settings mockup look)
 import bset_pages as bp  # noqa: E402  pages built on the design kit
+import bset_extra as bx  # noqa: E402  richer pages (updates, appearance, power, input, sound, display…)
 
 APP_ID = "org.bastilleos.Settings"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 BASTILLE_ACCENT = "#4f8fd4"
 
@@ -1422,9 +1423,9 @@ NAV_ITEMS = [   # (section, [(page name, glyph, page class)])
     ("System", [
         ("About", "info", bp.AboutPage),
         ("Performance", "cpu", bp.PerformancePage),
-        ("Power", "battery", bp.PowerPage),
-        ("Display", "display", DisplaysPage),
-        ("Sound", "volume", SoundPage),
+        ("Power", "battery", bx.PowerPage),
+        ("Display", "display", bx.DisplayPage),
+        ("Sound", "volume", bx.SoundPage),
         ("Printers", "printer", bp.PrintersPage),
         ("Persistence", "hdd", PersistencePage),
         ("Kernel & Boot", "gear", KernelBootPage),
@@ -1450,15 +1451,15 @@ NAV_ITEMS = [   # (section, [(page name, glyph, page class)])
         ("Installed Apps", "apps", ApplicationsPage),
         ("Flatpak Sandbox", "layers", bp.FlatpakPage),
         ("Software Updates", "download", UpdatesIntegrityPage),
-        ("Bastille Updates", "refresh", UpdatesPage),
+        ("Bastille Updates", "refresh", bx.UpdatesPage),
     ]),
     ("User", [
         ("Accounts", "user", UsersPage),
         ("Internet Accounts", "globe", InternetAccountsPage),
-        ("Notifications", "bell", bp.NotificationsPage),
-        ("Language & Region", "globe", bp.LanguagePage),
-        ("Accessibility", "access", bp.AccessibilityPage),
-        ("Appearance", "sparkle", AppearancePage),
+        ("Notifications", "bell", bx.NotificationsPage),
+        ("Language & Region", "globe", bx.LanguagePage),
+        ("Accessibility", "access", bx.AccessibilityPage),
+        ("Appearance", "sparkle", bx.AppearancePage),
     ]),
     ("Hardware", [
         ("USB Devices", "usb", bp.UsbPage),
@@ -1466,8 +1467,8 @@ NAV_ITEMS = [   # (section, [(page name, glyph, page class)])
         ("Hardware Security", "cpu", HardwareSecurityPage),
         ("Bluetooth", "bt", BluetoothPage),
         ("Camera & Mic", "camera", bp.CameraMicPage),
-        ("Keyboard", "keyboard", bp.KeyboardPage),
-        ("Mouse & Touchpad", "sliders", bp.MousePage),
+        ("Keyboard", "keyboard", bx.KeyboardPage),
+        ("Mouse & Touchpad", "sliders", bx.MousePage),
     ]),
 ]
 

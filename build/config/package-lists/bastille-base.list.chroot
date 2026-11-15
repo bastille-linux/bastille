@@ -34,6 +34,7 @@ libpam-elogind
 # Sway Wayland compositor stack
 sway
 swayidle
+wlsunset
 swaylock
 foot
 grim

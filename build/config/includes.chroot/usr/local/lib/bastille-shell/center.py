@@ -411,7 +411,7 @@ class Toasts:
         card.add_controller(click)
         self.box.append(card)
         self.win.present()
-        GLib.timeout_add_seconds(6, lambda: (self.drop(card), False)[1])
+        GLib.timeout_add_seconds(int(system.state_load("notify.json", {}).get("duration", 6)), lambda: (self.drop(card), False)[1])
 
     def drop(self, card):
         if card.get_parent() is self.box:
